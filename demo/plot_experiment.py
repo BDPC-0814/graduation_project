@@ -57,9 +57,9 @@ def stats(df_fixed, df_havfs):
     # 平均采样间隔
     avg_fixed = df_fixed["interval"].mean()
     avg_havfs = df_havfs["interval"].mean()
-    print("\n========== Interval Stats ==========")
-    print(f"Fixed avg interval : {avg_fixed:.2f}s")
-    print(f"HAVFS avg interval : {avg_havfs:.2f}s")
+    # print("\n========== Interval Stats ==========")
+    # print(f"Fixed avg interval : {avg_fixed:.2f}s")
+    # print(f"HAVFS avg interval : {avg_havfs:.2f}s")
 
 
 def main():
