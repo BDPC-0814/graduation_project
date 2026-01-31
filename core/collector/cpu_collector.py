@@ -1,15 +1,3 @@
-# core/collector/cpu_collector.py
-
-# import psutil
-# from core.collector.base_collector import BaseCollector
-
-
-# class CPUCollector(BaseCollector):
-#     def collect(self) -> float:
-#         # interval=None 表示“自上次调用以来的 CPU 利用率”
-#         return psutil.cpu_percent(interval=0.1)
-
-
 import psutil
 from core.collector.base_collector import BaseCollector
 from core.model.xpu_metrics import XPUDynamicMetrics
