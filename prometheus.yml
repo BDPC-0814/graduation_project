@@ -1,0 +1,4 @@
+scrape_configs:
+  - job_name: 'graduation_project'
+    static_configs:
+      - targets: ['host.docker.internal:8000'] # 指向你 Python 脚本运行的 IP:端口
