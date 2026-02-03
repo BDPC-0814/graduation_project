@@ -30,7 +30,7 @@ def print_header():
     """打印漂亮的表格头"""
     print("=" * 138)
     # 调整列宽适配内容
-    print(f"{'Timestamp':<14} | {'时间(s)':<9} | {'CPU利用率(%)':<6} | {'风险评分(0-100)':<15} | {'采样间隔(s)':<10} | {'变频决策状态':<20} | {'系统开销':<25}")
+    print(f"{'Timestamp':<14} | {'时间(s)':<9} | {'CPU利用率(%)':<6} | {'风险评分(0-100)':<15} | {'采样间隔(s)':<10} | {'变频决策状态':<16} | {'系统开销':<25}")
     print("-" * 138)
 
 def print_row(timestamp, now, metrics, risk, interval, state, cpu, mem):
@@ -47,7 +47,7 @@ def print_row(timestamp, now, metrics, risk, interval, state, cpu, mem):
         f"{metrics.utilization:<12.1f} | "
         f"{risk_str:<19} | "
         f"{interval:<14.2f} | "
-        f"{state:<20} | "
+        f"{state:<16} | "
         f"CPU:{cpu:4.1f}%  Mem:{mem:5.1f}MB"
     )
 
