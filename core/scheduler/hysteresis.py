@@ -1,19 +1,14 @@
 # core/scheduler/hysteresis.py
 
+"""
+[DEPRECATED] 该模块已在 HAVFS v3.0 中废弃。
+滞回控制逻辑已整合至 core/scheduler/havfs.py 中的 AIMD (加性增、乘性减) 策略。
+保留此文件仅为了兼容旧版本代码或作为历史参考。
+"""
+
 class HysteresisFSM:
-    """
-    滞回控制状态机：
-    防止采样频率频繁抖动
-    """
+    def __init__(self, *args, **kwargs):
+        pass
 
-    def __init__(self, r_high=1.5, r_low=0.8):
-        self.r_high = r_high
-        self.r_low = r_low
-        self.state = "LOW"
-
-    def update(self, risk):
-        if self.state == "LOW" and risk > self.r_high:
-            self.state = "HIGH"
-        elif self.state == "HIGH" and risk < self.r_low:
-            self.state = "LOW"
-        return self.state
+    def update(self, *args, **kwargs):
+        return "LOW"
