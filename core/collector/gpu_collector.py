@@ -1,9 +1,9 @@
+# core/collector/gpu_collector.py
+
 import random
-import time
 from core.collector.base_collector import BaseCollector
 from core.model.base_xpu import XPUDynamicMetrics
 
-# 尝试导入 pynvml，如果环境不支持则标记为不可用
 try:
     import pynvml
     HAS_NVML = True
@@ -12,8 +12,9 @@ except ImportError:
 
 class GPUCollector(BaseCollector):
     """
-    真实GPU采集器 (兼容模拟模式)
-    自动检测环境：如果有 NVIDIA 驱动则采集真实数据，否则回退到模拟数据。
+    真实GPU采集器 (Windows/Linux 通用增强版)
+    针对 Windows 笔记本显卡 (Optimus) 的休眠问题进行了容错处理：
+    当显卡休眠导致 NVML 返回 Unknown Error 时，自动判定为 0 负载，而非报错。
     """
 
     def __init__(self, device_id="gpu0", gpu_index=0):
@@ -21,70 +22,86 @@ class GPUCollector(BaseCollector):
         self.gpu_index = gpu_index
         self.use_real_gpu = False
         self.handle = None
-        self._last_init_ts = 0.0
 
-        self._init_nvml()
-
-    def _init_nvml(self):
-        """初始化 NVML 并获取 GPU 句柄"""
-        if not HAS_NVML:
-            print("[GPU] 'nvidia-ml-py' not installed. Fallback to simulation.")
-            return
-
-        try:
-            pynvml.nvmlInit()
-            self.handle = pynvml.nvmlDeviceGetHandleByIndex(self.gpu_index)
-            gpu_name = pynvml.nvmlDeviceGetName(self.handle)
-            if isinstance(gpu_name, bytes):
-                gpu_name = gpu_name.decode("utf-8")
-            print(f"[GPU] Detected NVIDIA GPU: {gpu_name}")
-            self.use_real_gpu = True
-            self._last_init_ts = time.time()
-        except pynvml.NVMLError as e:
-            print(f"[GPU] NVML Init failed ({self._format_nvml_error(e)}). Fallback to simulation.")
-            self.use_real_gpu = False
-            self.handle = None
+        if HAS_NVML:
+            try:
+                pynvml.nvmlInit()
+                self.handle = pynvml.nvmlDeviceGetHandleByIndex(self.gpu_index)
+                gpu_name = pynvml.nvmlDeviceGetName(self.handle)
+                if isinstance(gpu_name, bytes):
+                    gpu_name = gpu_name.decode("utf-8")
+                    
+                print(f"[GPU] Detected NVIDIA GPU: {gpu_name}")
+                self.use_real_gpu = True
+            except pynvml.NVMLError as e:
+                print(f"[GPU] NVML Init failed ({e}). Fallback to simulation.")
+        else:
+            print("[GPU] 'pynvml' not installed. Fallback to simulation.")
 
     def collect(self) -> XPUDynamicMetrics:
-        """根据环境决定调用真实采集还是模拟采集"""
         if self.use_real_gpu:
             return self._collect_real()
         else:
             return self._collect_simulated()
 
     def _collect_real(self) -> XPUDynamicMetrics:
-        """调用 NVML 获取真实指标"""
+        """
+        调用 NVML 获取真实指标
+        采用“尽力而为”策略：单个指标失败不影响整体，默认返回 0
+        """
+        # 默认值 (防止部分指标读取失败)
+        gpu_util = 0.0
+        mem_usage = 0.0
+        temp = 0.0
+        power = 0.0
+
         try:
-            util_rates = pynvml.nvmlDeviceGetUtilizationRates(self.handle)
-            gpu_util = float(util_rates.gpu)
+            # 1. 利用率 (最易失败)
+            try:
+                util_rates = pynvml.nvmlDeviceGetUtilizationRates(self.handle)
+                gpu_util = float(util_rates.gpu)
+            except pynvml.NVMLError:
+                # Windows 笔记本显卡休眠时常报 Unknown Error，视为 0 负载
+                gpu_util = 0.0
 
-            mem_info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
-            mem_usage_percent = (mem_info.used / mem_info.total) * 100 if mem_info.total > 0 else 0.0
+            # 2. 显存
+            try:
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
+                if mem_info.total > 0:
+                    mem_usage = (mem_info.used / mem_info.total) * 100
+            except pynvml.NVMLError:
+                mem_usage = 0.0
 
-            temp = pynvml.nvmlDeviceGetTemperature(self.handle, pynvml.NVML_TEMPERATURE_GPU)
+            # 3. 温度
+            try:
+                temp = pynvml.nvmlDeviceGetTemperature(self.handle, pynvml.NVML_TEMPERATURE_GPU)
+            except pynvml.NVMLError:
+                pass # 保持默认 0.0 或上一次的值
 
-            power_w = 0.0
+            # 4. 功率
             try:
                 power_mw = pynvml.nvmlDeviceGetPowerUsage(self.handle)
-                power_w = power_mw / 1000.0
+                power = power_mw / 1000.0
             except pynvml.NVMLError:
-                power_w = 0.0
+                pass # 很多笔记本不支持读取功率，忽略错误
 
             return XPUDynamicMetrics(
                 device_id=self.device_id,
                 utilization=gpu_util,
                 temperature=float(temp),
-                power=float(power_w),
-                memory_usage=float(mem_usage_percent),
+                power=float(power),
+                memory_usage=float(mem_usage),
                 bandwidth=0.0
             )
-        except pynvml.NVMLError as e:
-            print(f"[GPU] Error collecting data: {self._format_nvml_error(e)}")
-            self._attempt_reinit()
+
+        except Exception as e:
+            # 只有当发生严重错误（如句柄彻底失效）时，才回退到模拟
+            # 但对于 Unknown Error，我们已经在内部 try-catch 处理为 0 了，不会走到这里
+            # print(f"[GPU] Critical Error: {e}")
             return self._collect_simulated()
 
     def _collect_simulated(self) -> XPUDynamicMetrics:
-        """原有模拟逻辑：生成随机波动数据"""
+        """模拟模式"""
         util = random.uniform(10, 90)
         return XPUDynamicMetrics(
             device_id=self.device_id,
@@ -95,30 +112,7 @@ class GPUCollector(BaseCollector):
             bandwidth=random.uniform(100, 800)
         )
 
-    def _attempt_reinit(self):
-        """尝试重新初始化 NVML，避免偶发状态异常"""
-        now = time.time()
-        if now - self._last_init_ts < 5.0:
-            return
-        try:
-            pynvml.nvmlShutdown()
-        except Exception:
-            pass
-        self.use_real_gpu = False
-        self.handle = None
-        self._init_nvml()
-
-    @staticmethod
-    def _format_nvml_error(error: Exception) -> str:
-        """格式化 NVML 错误信息"""
-        try:
-            code = error.value
-            return f"{pynvml.nvmlErrorString(code).decode('utf-8')}"
-        except Exception:
-            return str(error)
-
     def __del__(self):
-        """析构时关闭 NVML"""
         if self.use_real_gpu and HAS_NVML:
             try:
                 pynvml.nvmlShutdown()
