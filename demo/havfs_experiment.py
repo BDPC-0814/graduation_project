@@ -18,6 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["fixed", "havfs"], default="fixed", help="采样模式")
     parser.add_argument("--device", choices=["cpu", "gpu"], default="cpu", help="设备类型")
+    parser.add_argument("--vendor", choices=["auto", "nvidia", "intel"], default="auto", help="显卡厂商 (auto/nvidia/intel)")
     parser.add_argument("--reporter", choices=["console", "prometheus"], default="console", help="上报方式")
     parser.add_argument("--fixed-interval", type=float, default=2.0)
     parser.add_argument("--t-min", type=float, default=0.5)
@@ -30,7 +31,7 @@ def print_header():
     """打印漂亮的表格头"""
     print("=" * 138)
     # 调整列宽适配内容
-    print(f"{'Timestamp':<14} | {'时间(s)':<9} | {'利用率(%)':<9} | {'风险评分(0-100)':<15} | {'采样间隔(s)':<10} | {'变频决策状态':<14} | {'系统开销':<25}")
+    print(f"{'Timestamp':<14} | {'时间(s)':<9} | {'利用率(%)':<9} | {'风险评分(0-100)':<15} | {'采样间隔(s)':<10} | {'变频决策状态':<16} | {'系统开销':<25}")
     print("-" * 138)
 
 def print_row(timestamp, now, metrics, risk, interval, state, cpu, mem):
@@ -59,8 +60,9 @@ def main():
 
     # 1. 初始化采集器
     if args.device == "gpu":
-        print("[信息] 设备类型: GPU (真实/模拟)")
-        collector = GPUCollector(device_id="gpu0")
+        print(f"[信息] 设备类型: GPU (厂商: {args.vendor})")
+        # 传入 vendor
+        collector = GPUCollector(device_id="gpu0", vendor=args.vendor)
     else:
         print("[信息] 设备类型: CPU (真实)")
         collector = CPUCollector(device_id="cpu0")
