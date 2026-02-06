@@ -30,7 +30,7 @@ def print_header():
     """打印漂亮的表格头"""
     print("=" * 138)
     # 调整列宽适配内容
-    print(f"{'Timestamp':<14} | {'时间(s)':<9} | {'CPU利用率(%)':<6} | {'风险评分(0-100)':<15} | {'采样间隔(s)':<10} | {'变频决策状态':<16} | {'系统开销':<25}")
+    print(f"{'Timestamp':<14} | {'时间(s)':<9} | {'CPU利用率(%)':<6} | {'风险评分(0-100)':<15} | {'采样间隔(s)':<10} | {'变频决策状态':<14} | {'系统开销':<25}")
     print("-" * 138)
 
 def print_row(timestamp, now, metrics, risk, interval, state, cpu, mem):
@@ -52,7 +52,7 @@ def print_row(timestamp, now, metrics, risk, interval, state, cpu, mem):
     )
 
 def main():
-    os.system('cls' if os.name == 'nt' else 'clear') 
+    # os.system('cls' if os.name == 'nt' else 'clear') 
     print(f"\n>>> 毕设实验系统启动 [PID: {os.getpid()}]")
     args = parse_args()
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
