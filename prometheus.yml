@@ -1,4 +1,20 @@
+global:
+  scrape_interval: 1s # 保持高频抓取以展示 HAVFS 效果
+
 scrape_configs:
-  - job_name: 'graduation_project'
+  - job_name: 'havfs_cluster'
     static_configs:
-      - targets: ['host.docker.internal:8000'] # 指向你 Python 脚本运行的 IP:端口
+      # --- 节点 1: Ubuntu 本地 (通过 Docker 宿主网关访问) ---
+      - targets: ['host.docker.internal:8000']
+        labels:
+          nodename: 'ubuntu-edge-node'
+          os: 'linux'
+          chip: 'cpu'
+
+      # --- 节点 2: Windows 宿主机 (填入第一步获取的真实 IP) ---
+      # ⚠️ 请修改下面的 IP 为你 Windows 的真实 IP
+      - targets: ['192.168.10.15:8000']  
+        labels:
+          nodename: 'windows-cloud-node'
+          os: 'windows'
+          chip: 'gpu'
