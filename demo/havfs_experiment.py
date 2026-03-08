@@ -66,6 +66,16 @@ def collect_parallel(collectors, executor):
         device_id: futures[device_id].result()
         for device_id in collectors
     }
+def collect_parallel(collectors):
+    with ThreadPoolExecutor(max_workers=max(1, len(collectors))) as pool:
+        futures = {
+            device_id: pool.submit(collector.collect)
+            for device_id, collector in collectors.items()
+        }
+        return {
+            device_id: futures[device_id].result()
+            for device_id in collectors
+        }
 
 
 def main():
@@ -177,6 +187,68 @@ def main():
                         )
 
                     time.sleep(global_interval)
+            while time.time() - start_time < args.duration:
+                metrics_map = collect_parallel(collectors)
+
+                if args.mode == "fixed":
+                    global_interval = args.fixed_interval
+                    schedule_detail = {
+                        "global_risk": 0.0,
+                        "per_device": {
+                            device_id: {
+                                "interval": args.fixed_interval,
+                                "risk": 0.0,
+                                "state": "固定频率",
+                            }
+                            for device_id in collectors
+                        },
+                    }
+                else:
+                    if isinstance(scheduler, UnifiedScheduler):
+                        global_interval, schedule_detail = scheduler.update(metrics_map)
+                    else:
+                        only_id = list(metrics_map.keys())[0]
+                        interval, risk, state = scheduler.update(metrics_map[only_id])
+                        global_interval = interval
+                        schedule_detail = {
+                            "global_risk": risk,
+                            "per_device": {
+                                only_id: {"interval": interval, "risk": risk, "state": state}
+                            },
+                        }
+
+                self_cpu = process.cpu_percent(interval=None)
+                self_mem = process.memory_info().rss / 1024 / 1024
+                now = round(time.time() - start_time, 2)
+                current_time_str = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+                for device_id, metrics in metrics_map.items():
+                    detail = schedule_detail["per_device"][device_id]
+
+                    if isinstance(reporter, PrometheusReporter):
+                        reporter.send(metrics, detail["risk"], detail["interval"])
+
+                    writer.writerow(
+                        [
+                            current_time_str,
+                            now,
+                            metrics.device_id,
+                            metrics.utilization,
+                            detail["risk"],
+                            detail["interval"],
+                            detail["state"],
+                            self_cpu,
+                            self_mem,
+                        ]
+                    )
+
+                    print(
+                        f"[{current_time_str}] {device_id:<4} | util={metrics.utilization:6.2f}% | "
+                        f"risk={detail['risk']:6.2f} | interval={detail['interval']:4.2f}s | "
+                        f"state={detail['state']}"
+                    )
+
+                time.sleep(global_interval)
 
         except KeyboardInterrupt:
             print("\n[用户中断] 实验提前结束。")
