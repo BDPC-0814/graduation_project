@@ -247,14 +247,13 @@ class HAVFS:
         # 生成用于显示的中文状态标签
         if raw_state == "HIGH":
             # 细分 HIGH 的原因 (用于 UI 显示)
-            if A > 0: state_label = "高频(阈值触发)"
-            elif J > 20: state_label = "高频(突变检测)"
-            else: state_label = "高频(高风险区)"
+            if A > 0 or J > 20: state_label = "高频(突发捕获)"
+            else: state_label = "高频(驻留观察)"
         else:
             # LOW 状态
             if self.current_interval < self.t_max:
-                state_label = "恢复(线性回升)"
+                state_label = "低频(平滑恢复)"
             else:
-                state_label = "稳定(低频基准)"
+                state_label = "低频(稳定巡检)"
 
         return self.current_interval, R * 100.0, state_label
