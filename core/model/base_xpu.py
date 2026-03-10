@@ -40,6 +40,10 @@ class XPUDynamicMetrics:
     # 设备标识
     device_id: str = "0"
 
+    # 数据质量与可用性标记（避免“0值=稳定”误判）
+    status: str = "ok"              # ok / unavailable / error
+    error: Optional[str] = None
+
     def summary(self) -> str:
         """
         用于调试输出
@@ -49,5 +53,7 @@ class XPUDynamicMetrics:
             f"temp={self.temperature}, "
             f"power={self.power}, "
             f"mem={self.memory_usage}, "
-            f"bw={self.bandwidth}"
+            f"bw={self.bandwidth}, "
+            f"status={self.status}, "
+            f"error={self.error}"
         )
