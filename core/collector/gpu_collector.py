@@ -81,7 +81,7 @@ class GPUCollector(BaseCollector):
             return self._collect_nvidia()
         if self.mode == "windows_generic":
             return self._collect_windows_generic()
-        return self._collect_unavailable()
+        return self._collect_unavailable(self.init_error or "gpu collector unavailable")
 
     def _collect_windows_generic(self) -> XPUDynamicMetrics:
         util = 0.0
@@ -143,9 +143,9 @@ class GPUCollector(BaseCollector):
         except Exception as exc:  # noqa: BLE001
             # 关键修复：NVML 单次采样失败时返回0并保留设备信息，不再回退“随机模拟值”
             print(f"[GPU][Warn] NVML采样失败，回退0值: {exc}")
-            return self._collect_unavailable()
+            return self._collect_unavailable(f"nvml sample failed: {exc}")
 
-    def _collect_unavailable(self) -> XPUDynamicMetrics:
+    def _collect_unavailable(self, reason: str) -> XPUDynamicMetrics:
         return XPUDynamicMetrics(
             device_id=self.device_id,
             utilization=0.0,
@@ -153,6 +153,8 @@ class GPUCollector(BaseCollector):
             power=None,
             memory_usage=None,
             bandwidth=None,
+            status="unavailable",
+            error=reason,
         )
 
     def __del__(self):

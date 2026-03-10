@@ -35,7 +35,7 @@ class NPUCollector(BaseCollector):
     def collect(self) -> XPUDynamicMetrics:
         if self.mode == "ascend_npu_smi":
             return self._collect_ascend()
-        return self._collect_unavailable()
+        return self._collect_unavailable(self.init_error or "npu collector unavailable")
 
     def _collect_ascend(self) -> XPUDynamicMetrics:
         try:
@@ -45,7 +45,7 @@ class NPUCollector(BaseCollector):
 
             row = self._find_card_row(output)
             if row is None:
-                return self._collect_unavailable()
+                return self._collect_unavailable("npu-smi output parse failed")
 
             util = self._extract_percent(row, ("AICore", "Util", "AICore(%)"))
             temperature = self._extract_number(row, ("Temp", "Temperature"))
@@ -62,7 +62,7 @@ class NPUCollector(BaseCollector):
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[NPU][Warn] npu-smi采样失败，回退0值: {exc}")
-            return self._collect_unavailable()
+            return self._collect_unavailable(f"npu-smi sample failed: {exc}")
 
     def _find_card_row(self, text: str) -> Optional[str]:
         for line in text.splitlines():
@@ -96,7 +96,7 @@ class NPUCollector(BaseCollector):
                 return used / total * 100.0
         return None
 
-    def _collect_unavailable(self) -> XPUDynamicMetrics:
+    def _collect_unavailable(self, reason: str) -> XPUDynamicMetrics:
         return XPUDynamicMetrics(
             device_id=self.device_id,
             utilization=0.0,
@@ -104,4 +104,6 @@ class NPUCollector(BaseCollector):
             power=None,
             memory_usage=None,
             bandwidth=None,
+            status="unavailable",
+            error=reason,
         )
