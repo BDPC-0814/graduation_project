@@ -1,0 +1,9 @@
+﻿
+device status      detail                                                                                              
+------ ------      ------                                                                                              
+cpu    passed      populated fields: utilization, power_w, freq_mhz, threads, ctx_switch_rate, duty_cycle_percent; e...
+gpu    passed      populated fields: utilization; empty fields: chip_temp_c, power_w, mem_util_percent, nv_graphics_...
+npu    unavailable device unavailable, error=npu-smi command not found                                                 
+
+
+

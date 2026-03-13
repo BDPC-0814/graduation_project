@@ -1,0 +1,2 @@
+﻿timestamp,time,device_id,event_type,severity,message,detail
+11:18:31.784,2.39,gpu0,collector_unavailable,high,nvml sample failed: Unknown Error,"util=0.0%, temp=None, power=None, freq=None, mem=None, status=unavailable, error=nvml sample failed: Unknown Error"

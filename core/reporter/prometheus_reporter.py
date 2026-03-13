@@ -1,58 +1,63 @@
-# core/reporter/prometheus_reporter.py
-from prometheus_client import start_http_server, Gauge
-from core.reporter.base_reporter import BaseReporter
+from prometheus_client import Gauge, start_http_server
+
 from core.model.base_xpu import XPUDynamicMetrics
+from core.reporter.base_reporter import BaseReporter
+
 
 class PrometheusReporter(BaseReporter):
     """
-    Prometheus Exporter 实现
-    功能：
-    - 启动 HTTP Server (默认端口 8000)
-    - 将 XPUDynamicMetrics 映射为 Prometheus Gauge 指标
+    Prometheus exporter for core XPU metrics.
     """
 
-    def __init__(self, port=8000):
+    def __init__(self, port: int = 8000):
         self.port = port
-        print(f"[Prometheus] Starting exporter on port {port}...")
-        
-        # 启动后台 HTTP 服务，供 Prometheus Server 拉取
-        # 注意：在多进程环境下需小心，但在毕设单脚本实验中没问题
+        print(f"[Prometheus] starting exporter on port {port}")
         try:
             start_http_server(port)
         except OSError:
-            print(f"[Warn] Port {port} is busy. Metrics might not be exposed.")
+            print(f"[Warn] port {port} is busy; metrics may not be exposed")
 
-        # --- 定义指标 (Gauge) ---
-        # 标签 (Labels): device_id, device_type
-        labels = ['device_id']
-        
-        self.g_util = Gauge('xpu_utilization_percent', 'Device Utilization', labels)
-        self.g_temp = Gauge('xpu_temperature_celsius', 'Device Temperature', labels)
-        self.g_power = Gauge('xpu_power_watts', 'Device Power Consumption', labels)
-        self.g_mem  = Gauge('xpu_memory_usage_percent', 'Memory Usage', labels)
-        self.g_risk = Gauge('xpu_risk_score', 'Calculated Risk Score', labels)
-        self.g_int  = Gauge('xpu_sampling_interval_seconds', 'Current Sampling Interval', labels)
+        labels = ["device_id"]
+        self.g_util = Gauge("xpu_utilization_percent", "Device utilization", labels)
+        self.g_temp = Gauge("xpu_chip_temperature_celsius", "Chip temperature", labels)
+        self.g_power = Gauge("xpu_power_watts", "Power consumption", labels)
+        self.g_mem = Gauge("xpu_memory_usage_percent", "Memory usage percent", labels)
+        self.g_freq = Gauge("xpu_frequency_mhz", "Current frequency", labels)
+        self.g_freq_cap = Gauge("xpu_frequency_cap_mhz", "Frequency cap", labels)
+        self.g_pcie_rx = Gauge("xpu_pcie_rx_megabytes_per_second", "PCIe RX throughput", labels)
+        self.g_pcie_tx = Gauge("xpu_pcie_tx_megabytes_per_second", "PCIe TX throughput", labels)
+        self.g_duty = Gauge("xpu_duty_cycle_percent", "Sliding window utilization", labels)
+        self.g_threads = Gauge("xpu_threads", "Active threads", labels)
+        self.g_io_util = Gauge("xpu_io_util_percent", "IO utilization", labels)
+        self.g_status = Gauge("xpu_status_ok", "1 if collector status is ok else 0", labels)
+        self.g_risk = Gauge("xpu_risk_score", "Calculated risk score", labels)
+        self.g_int = Gauge("xpu_sampling_interval_seconds", "Current scheduling interval", labels)
 
     def send(self, metrics: XPUDynamicMetrics, risk: float = 0.0, interval: float = 1.0):
-        """
-        更新指标数值
-        注意：send 方法签名增加了 risk 和 interval 参数，以便上报调度状态
-        """
-        # 提取标签值
         lbl = [metrics.device_id]
 
-        # 更新 Gauges
         self.g_util.labels(*lbl).set(metrics.utilization)
-        
-        if metrics.temperature is not None:
-            self.g_temp.labels(*lbl).set(metrics.temperature)
-            
-        if metrics.power is not None:
-            self.g_power.labels(*lbl).set(metrics.power)
-            
-        if metrics.memory_usage is not None:
-            self.g_mem.labels(*lbl).set(metrics.memory_usage)
-
-        # 上报算法状态（这对可视化非常有价值）
+        self.g_status.labels(*lbl).set(1 if metrics.status == "ok" else 0)
         self.g_risk.labels(*lbl).set(risk)
         self.g_int.labels(*lbl).set(interval)
+
+        if metrics.chip_temp_c is not None:
+            self.g_temp.labels(*lbl).set(metrics.chip_temp_c)
+        if metrics.power_w is not None:
+            self.g_power.labels(*lbl).set(metrics.power_w)
+        if metrics.mem_util_percent is not None:
+            self.g_mem.labels(*lbl).set(metrics.mem_util_percent)
+        if metrics.freq_mhz is not None:
+            self.g_freq.labels(*lbl).set(metrics.freq_mhz)
+        if metrics.freq_cap_mhz is not None:
+            self.g_freq_cap.labels(*lbl).set(metrics.freq_cap_mhz)
+        if metrics.pcie_rx_MBps is not None:
+            self.g_pcie_rx.labels(*lbl).set(metrics.pcie_rx_MBps)
+        if metrics.pcie_tx_MBps is not None:
+            self.g_pcie_tx.labels(*lbl).set(metrics.pcie_tx_MBps)
+        if metrics.duty_cycle_percent is not None:
+            self.g_duty.labels(*lbl).set(metrics.duty_cycle_percent)
+        if metrics.threads is not None:
+            self.g_threads.labels(*lbl).set(metrics.threads)
+        if metrics.io_util_percent is not None:
+            self.g_io_util.labels(*lbl).set(metrics.io_util_percent)

@@ -4,21 +4,30 @@ import argparse
 import csv
 import json
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import psutil
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from core.collector.cpu_collector import CPUCollector
 from core.collector.gpu_collector import GPUCollector
 from core.collector.npu_collector import NPUCollector
 from core.reporter.console_reporter import ConsoleReporter
-from core.reporter.prometheus_reporter import PrometheusReporter
 from core.scheduler.havfs import HAVFS
 from core.scheduler.unified_scheduler import UnifiedScheduler
 from core.storage.sqlite_outbox import SQLiteOutbox
 from core.uploader.http_uploader import HTTPUploader
+
+try:
+    from core.reporter.prometheus_reporter import PrometheusReporter
+except ModuleNotFoundError:
+    PrometheusReporter = None
 
 
 def parse_args():
@@ -120,7 +129,12 @@ def main():
     else:
         scheduler = None
 
-    reporter = PrometheusReporter(port=8000) if args.reporter == "prometheus" else ConsoleReporter()
+    if args.reporter == "prometheus":
+        if PrometheusReporter is None:
+            raise ModuleNotFoundError("prometheus_client is required when --reporter=prometheus")
+        reporter = PrometheusReporter(port=8000)
+    else:
+        reporter = ConsoleReporter()
     outbox = SQLiteOutbox(args.outbox_db)
     uploader = HTTPUploader(args.remote_endpoint) if args.remote_endpoint else None
 
@@ -139,6 +153,40 @@ def main():
                 "time",
                 "device_id",
                 "utilization",
+                "chip_temp_c",
+                "board_temp_c",
+                "power_w",
+                "freq_mhz",
+                "freq_cap_mhz",
+                "mem_total_mib",
+                "mem_used_mib",
+                "mem_util_percent",
+                "pcie_rx_MBps",
+                "pcie_tx_MBps",
+                "pstate",
+                "power_limit_w",
+                "throttle_flag",
+                "throttle_cause",
+                "last_error_code",
+                "last_error_ts",
+                "fan_rpm",
+                "perf_per_watt",
+                "correctable_err_s",
+                "uncorrectable_err_s",
+                "device_uptime_s",
+                "device_reset_count",
+                "nv_throttle_reasons",
+                "nv_ecc_correctable_total",
+                "nv_ecc_ue_total",
+                "nv_mem_clock_mhz",
+                "nv_graphics_clock_mhz",
+                "threads",
+                "ctx_switch_rate",
+                "l3_cache_mib",
+                "io_util_percent",
+                "duty_cycle_percent",
+                "collect_ts",
+                "sample_interval_s",
                 "risk_score",
                 "interval",
                 "state",
@@ -243,7 +291,7 @@ def main():
                             event_writer.writerow(event_payload.values())
                             outbox.enqueue("event", event_payload)
 
-                        if isinstance(reporter, PrometheusReporter):
+                        if PrometheusReporter is not None and isinstance(reporter, PrometheusReporter):
                             reporter.send(metrics, detail["risk"], detail["interval"])
 
                         metric_payload = {
@@ -251,9 +299,40 @@ def main():
                             "time": now,
                             "device_id": metrics.device_id,
                             "utilization": metrics.utilization,
-                            "temperature": metrics.temperature,
-                            "power": metrics.power,
-                            "memory_usage": metrics.memory_usage,
+                            "chip_temp_c": metrics.chip_temp_c,
+                            "board_temp_c": metrics.board_temp_c,
+                            "power_w": metrics.power_w,
+                            "freq_mhz": metrics.freq_mhz,
+                            "freq_cap_mhz": metrics.freq_cap_mhz,
+                            "mem_total_mib": metrics.mem_total_mib,
+                            "mem_used_mib": metrics.mem_used_mib,
+                            "mem_util_percent": metrics.mem_util_percent,
+                            "pcie_rx_MBps": metrics.pcie_rx_MBps,
+                            "pcie_tx_MBps": metrics.pcie_tx_MBps,
+                            "pstate": metrics.pstate,
+                            "power_limit_w": metrics.power_limit_w,
+                            "throttle_flag": metrics.throttle_flag,
+                            "throttle_cause": metrics.throttle_cause,
+                            "last_error_code": metrics.last_error_code,
+                            "last_error_ts": metrics.last_error_ts,
+                            "fan_rpm": metrics.fan_rpm,
+                            "perf_per_watt": metrics.perf_per_watt,
+                            "correctable_err_s": metrics.correctable_err_s,
+                            "uncorrectable_err_s": metrics.uncorrectable_err_s,
+                            "device_uptime_s": metrics.device_uptime_s,
+                            "device_reset_count": metrics.device_reset_count,
+                            "nv_throttle_reasons": metrics.nv_throttle_reasons,
+                            "nv_ecc_correctable_total": metrics.nv_ecc_correctable_total,
+                            "nv_ecc_ue_total": metrics.nv_ecc_ue_total,
+                            "nv_mem_clock_mhz": metrics.nv_mem_clock_mhz,
+                            "nv_graphics_clock_mhz": metrics.nv_graphics_clock_mhz,
+                            "threads": metrics.threads,
+                            "ctx_switch_rate": metrics.ctx_switch_rate,
+                            "l3_cache_mib": metrics.l3_cache_mib,
+                            "io_util_percent": metrics.io_util_percent,
+                            "duty_cycle_percent": metrics.duty_cycle_percent,
+                            "collect_ts": metrics.collect_ts,
+                            "sample_interval_s": metrics.sample_interval_s,
                             "risk_score": detail["risk"],
                             "interval": detail["interval"],
                             "state": detail["state"],
@@ -268,6 +347,40 @@ def main():
                                 now,
                                 metrics.device_id,
                                 metrics.utilization,
+                                metrics.chip_temp_c,
+                                metrics.board_temp_c,
+                                metrics.power_w,
+                                metrics.freq_mhz,
+                                metrics.freq_cap_mhz,
+                                metrics.mem_total_mib,
+                                metrics.mem_used_mib,
+                                metrics.mem_util_percent,
+                                metrics.pcie_rx_MBps,
+                                metrics.pcie_tx_MBps,
+                                metrics.pstate,
+                                metrics.power_limit_w,
+                                metrics.throttle_flag,
+                                metrics.throttle_cause,
+                                metrics.last_error_code,
+                                metrics.last_error_ts,
+                                metrics.fan_rpm,
+                                metrics.perf_per_watt,
+                                metrics.correctable_err_s,
+                                metrics.uncorrectable_err_s,
+                                metrics.device_uptime_s,
+                                metrics.device_reset_count,
+                                metrics.nv_throttle_reasons,
+                                metrics.nv_ecc_correctable_total,
+                                metrics.nv_ecc_ue_total,
+                                metrics.nv_mem_clock_mhz,
+                                metrics.nv_graphics_clock_mhz,
+                                metrics.threads,
+                                metrics.ctx_switch_rate,
+                                metrics.l3_cache_mib,
+                                metrics.io_util_percent,
+                                metrics.duty_cycle_percent,
+                                metrics.collect_ts,
+                                metrics.sample_interval_s,
                                 detail["risk"],
                                 detail["interval"],
                                 detail["state"],
@@ -280,6 +393,8 @@ def main():
 
                         print(
                             f"[{current_time_str}] {device_id:<4} | util={metrics.utilization:6.2f}% | "
+                            f"temp={metrics.chip_temp_c if metrics.chip_temp_c is not None else 'NA'} | "
+                            f"power={metrics.power_w if metrics.power_w is not None else 'NA'} | "
                             f"risk={detail['risk']:6.2f} | interval={detail['interval']:4.2f}s | "
                             f"state={detail['state']} | status={metrics.status}"
                         )

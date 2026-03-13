@@ -1,0 +1,3 @@
+﻿timestamp,time,device_id,event_type,severity,message,detail
+11:04:13.358,0.0,npu0,collector_unavailable,high,npu-smi command not found,"util=0.0%, temp=None, power=None, freq=None, mem=None, status=unavailable, error=npu-smi command not found"
+11:04:15.365,2.01,npu0,collector_unavailable,high,npu-smi command not found,"util=0.0%, temp=None, power=None, freq=None, mem=None, status=unavailable, error=npu-smi command not found"

@@ -1,0 +1,9 @@
+﻿
+device status      detail                                                                                                    
+------ ------      ------                                                                                                    
+cpu    passed      populated fields: utilization, power_w, freq_mhz, threads, ctx_switch_rate, duty_cycle_percent; empty f...
+gpu    unavailable device unavailable, error=nvml sample failed: Unknown Error                                               
+npu    unavailable device unavailable, error=npu-smi command not found                                                       
+
+
+

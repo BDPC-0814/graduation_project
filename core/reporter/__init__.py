@@ -1,4 +1,8 @@
 # core/reporter/__init__.py
 
 from .console_reporter import ConsoleReporter
-from .prometheus_reporter import PrometheusReporter
+
+try:
+    from .prometheus_reporter import PrometheusReporter
+except ModuleNotFoundError:  # Optional dependency: prometheus_client
+    PrometheusReporter = None

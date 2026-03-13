@@ -1,0 +1,78 @@
+# 统一字段定义表
+
+本文档整理了系统当前已经落地到代码中的 XPU 统一字段，字段名与实现以 [base_xpu.py](c:/Users/86139/Documents/GitHub/graduation_project/core/model/base_xpu.py) 和 [havfs_experiment.py](c:/Users/86139/Documents/GitHub/graduation_project/demo/havfs_experiment.py) 为准，可直接作为论文“统一字段定义表”或附录的基础版本。
+
+## 表 1-1 所有 XPU 通用字段表
+
+| 字段 | 含义 | 单位 | 类型 | 属性 | 典型来源 |
+| --- | --- | --- | --- | --- | --- |
+| device_id | 采集系统内部设备标识，如 `cpu0/gpu0/npu0` | - | STRING | 静态 | agent 组装 |
+| device_uid | 设备唯一标识 | - | STRING | 静态 | 配置/驱动枚举 |
+| device_type | 设备类型 | - | STRING | 静态 | 配置 |
+| arch | 架构信息 | - | STRING | 静态 | OS/驱动 |
+| vendor | 厂商信息 | - | STRING | 静态 | OS/CLI |
+| model_name | 设备型号 | - | STRING | 静态 | OS/CLI |
+| driver_version | 驱动或内核版本 | - | STRING | 半静态 | 驱动/内核 |
+| firmware_version | 固件/微码/vBIOS 版本 | - | STRING | 半静态 | CLI/硬件接口 |
+| core_count | 计算单元数 | count | INT | 静态 | OS/CLI |
+| utilization | 设备计算利用率 | % | DOUBLE | 动态 | psutil/厂商库 |
+| chip_temp_c | 芯片温度 | degC | DOUBLE | 动态 | 传感器/厂商库 |
+| board_temp_c | 板级或环境温度 | degC | DOUBLE | 动态 | 传感器 |
+| power_w | 实时功耗 | W | DOUBLE | 动态 | RAPL/厂商库 |
+| freq_mhz | 当前主频或核心频率 | MHz | DOUBLE | 动态 | psutil/厂商库 |
+| freq_cap_mhz | 当前频率上限 | MHz | DOUBLE | 半动态 | 驱动/策略 |
+| throttle_flag | 是否处于限频状态 | bool | BOOLEAN | 动态 | 驱动/推断 |
+| throttle_cause | 限频原因摘要 | - | STRING | 动态 | 驱动 |
+| last_error_code | 最近错误摘要 | - | STRING | 动态 | 日志/collector |
+| last_error_ts | 最近错误时间戳 | s | INT | 动态 | 日志/collector |
+| duty_cycle_percent | 滑窗平均负载占比 | % | DOUBLE | 动态 | 统计窗口 |
+| collect_ts | 本次采集时间戳 | s | INT | 动态 | agent |
+| sample_interval_s | 采样窗口长度 | s | DOUBLE | 动态 | agent |
+| status | 采集状态，`ok/unavailable/error` | - | STRING | 动态 | collector |
+| error | 当前采集错误详情 | - | STRING | 动态 | collector |
+
+## 表 1-2 加速器通用字段表
+
+| 字段 | 含义 | 单位 | 类型 | 属性 | 典型来源 |
+| --- | --- | --- | --- | --- | --- |
+| mem_total_mib | 专用显存或片上存储总量 | MiB | INT | 静态 | 厂商库 |
+| mem_used_mib | 已用显存或片上存储 | MiB | INT | 动态 | 厂商库 |
+| mem_util_percent | 显存或片上存储利用率 | % | DOUBLE | 动态 | 厂商库 |
+| pcie_rx_MBps | PCIe 接收吞吐 | MB/s | DOUBLE | 动态 | 计数器/厂商库 |
+| pcie_tx_MBps | PCIe 发送吞吐 | MB/s | DOUBLE | 动态 | 计数器/厂商库 |
+| pstate | 性能状态 | - | STRING | 动态 | 厂商库 |
+| power_limit_w | 功率上限 | W | DOUBLE | 半动态 | 厂商库/配置 |
+| correctable_err_s | 可纠错错误速率 | count/s | DOUBLE | 动态 | RAS/ECC |
+| uncorrectable_err_s | 不可纠错错误速率 | count/s | DOUBLE | 动态 | RAS/ECC |
+| device_uptime_s | 设备复位后运行时长 | s | INT | 动态 | 驱动 |
+| device_reset_count | 设备复位计数 | count | INT | 动态 | 驱动 |
+
+## 表 1-3 CPU 特有字段表
+
+| 字段 | 含义 | 单位 | 类型 | 属性 | 典型来源 |
+| --- | --- | --- | --- | --- | --- |
+| threads | 活跃线程总数 | count | INT | 动态 | psutil |
+| ctx_switch_rate | 上下文切换速率 | count/s | DOUBLE | 动态 | psutil |
+| l3_cache_mib | L3 缓存容量 | MiB | INT | 静态 | `lscpu`/`wmic` |
+| io_util_percent | I/O 利用率 | % | DOUBLE | 动态 | `psutil.disk_io_counters()` |
+
+## 表 1-4 GPU 特有字段表
+
+| 字段 | 含义 | 单位 | 类型 | 属性 | 典型来源 |
+| --- | --- | --- | --- | --- | --- |
+| fan_rpm | 风扇转速 | rpm | INT | 动态 | NVML |
+| perf_per_watt | 能效比，定义为 `utilization/power_w` | - | DOUBLE | 动态 | 计算/NVML |
+| nv_throttle_reasons | NVIDIA 限频原因字符串 | - | STRING | 动态 | NVML |
+| nv_ecc_correctable_total | ECC 可纠错累计次数 | count | INT | 动态 | NVML |
+| nv_ecc_ue_total | ECC 不可纠错累计次数 | count | INT | 动态 | NVML |
+| nv_mem_clock_mhz | 显存频率 | MHz | DOUBLE | 动态 | NVML |
+| nv_graphics_clock_mhz | 图形或核心频率 | MHz | DOUBLE | 动态 | NVML |
+
+## 字段落地说明
+
+1. 统一运行态字段定义位于 [base_xpu.py](c:/Users/86139/Documents/GitHub/graduation_project/core/model/base_xpu.py)。
+2. 导出到实验 CSV 的字段位于 [havfs_experiment.py](c:/Users/86139/Documents/GitHub/graduation_project/demo/havfs_experiment.py)。
+3. 当前 CPU 侧可稳定获取 `utilization`、`power_w`、`freq_mhz`、`threads`、`ctx_switch_rate`、`l3_cache_mib`、`duty_cycle_percent` 等字段；温度字段依赖平台是否暴露传感器。
+4. 当前 GPU 侧主要针对 NVIDIA NVML 实现，若环境缺少 NVML 或无 NVIDIA GPU，则返回 `status=unavailable`。
+5. 当前 NPU 侧依赖 `npu-smi info` 输出格式，若系统未安装 `npu-smi` 或格式不匹配，则返回 `status=unavailable`。
+6. 为兼容现有链路，`temperature/power/memory_usage/bandwidth` 仍保留为兼容字段，并由新字段自动回填。
