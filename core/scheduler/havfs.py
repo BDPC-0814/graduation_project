@@ -70,6 +70,14 @@ class RiskBuffer:
         return len(self.buffer)
 
 
+@dataclass
+class RiskBreakdown:
+    anomaly: float = 0.0
+    jump: float = 0.0
+    pressure: float = 0.0
+    drift: float = 0.0
+
+
 # ==========================================================
 # HAVFS v4.0 完整五步闭环实现 (论文终极版)
 # ==========================================================
@@ -119,6 +127,7 @@ class HAVFS:
 
         # 辅助变量
         self.last_x = None
+        self.last_breakdown = RiskBreakdown()
 
     # ======================================================
     # Step 2: 四分量风险计算
@@ -174,8 +183,17 @@ class HAVFS:
 
         # 权重分配 (可根据论文实验调整)
         w1, w2, w3, w4 = 0.3, 0.3, 0.2, 0.2
-        R = w1 * nA + w2 * nJ + w3 * nP + w4 * nD
-        
+        contribution_a = w1 * nA
+        contribution_j = w2 * nJ
+        contribution_p = w3 * nP
+        contribution_d = w4 * nD
+        R = contribution_a + contribution_j + contribution_p + contribution_d
+        self.last_breakdown = RiskBreakdown(
+            anomaly=contribution_a * 100.0,
+            jump=contribution_j * 100.0,
+            pressure=contribution_p * 100.0,
+            drift=contribution_d * 100.0,
+        )
         return min(max(R, 0.0), 1.0)
 
     def hybrid_control(self, R):
@@ -256,4 +274,4 @@ class HAVFS:
             else:
                 state_label = "低频(稳定巡检)"
 
-        return self.current_interval, R * 100.0, state_label
+        return self.current_interval, R * 100.0, state_label, self.last_breakdown

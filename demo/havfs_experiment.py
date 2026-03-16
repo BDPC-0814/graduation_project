@@ -1,13 +1,7 @@
-# demo/havfs_experiment.py
-
 import argparse
 import csv
-import json
 import os
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 
 import psutil
 
@@ -15,12 +9,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from core.collector.cpu_collector import CPUCollector
-from core.collector.gpu_collector import GPUCollector
-from core.collector.npu_collector import NPUCollector
+from core.adapter.cpu.cpu_adapter import CPUAdapter
+from core.adapter.gpu.gpu_adapter import GPUAdapter
+from core.adapter.npu.npu_adapter import NPUAdapter
 from core.reporter.console_reporter import ConsoleReporter
-from core.scheduler.havfs import HAVFS
-from core.scheduler.unified_scheduler import UnifiedScheduler
+from core.runtime.edge_agent import EdgeAgent
+from core.sampler.device_sampler import DeviceSampler
 from core.storage.sqlite_outbox import SQLiteOutbox
 from core.uploader.http_uploader import HTTPUploader
 
@@ -30,17 +24,76 @@ except ModuleNotFoundError:
     PrometheusReporter = None
 
 
+METRIC_HEADERS = [
+    "timestamp",
+    "time",
+    "device_id",
+    "utilization",
+    "chip_temp_c",
+    "board_temp_c",
+    "power_w",
+    "freq_mhz",
+    "freq_cap_mhz",
+    "mem_total_mib",
+    "mem_used_mib",
+    "mem_util_percent",
+    "pcie_rx_MBps",
+    "pcie_tx_MBps",
+    "pstate",
+    "power_limit_w",
+    "throttle_flag",
+    "throttle_cause",
+    "last_error_code",
+    "last_error_ts",
+    "fan_rpm",
+    "perf_per_watt",
+    "correctable_err_s",
+    "uncorrectable_err_s",
+    "device_uptime_s",
+    "device_reset_count",
+    "nv_throttle_reasons",
+    "nv_ecc_correctable_total",
+    "nv_ecc_ue_total",
+    "nv_mem_clock_mhz",
+    "nv_graphics_clock_mhz",
+    "threads",
+    "ctx_switch_rate",
+    "l3_cache_mib",
+    "io_util_percent",
+    "duty_cycle_percent",
+    "collect_ts",
+    "sample_interval_s",
+    "risk_score",
+    "risk_anomaly",
+    "risk_jump",
+    "risk_pressure",
+    "risk_drift",
+    "interval",
+    "state",
+    "sampled_slow",
+    "overhead_cpu",
+    "overhead_mem_mb",
+    "status",
+    "error",
+]
+
+EVENT_HEADERS = [
+    "timestamp",
+    "time",
+    "device_id",
+    "event_type",
+    "severity",
+    "message",
+    "detail",
+]
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["fixed", "havfs"], default="fixed", help="采样模式")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="设备类型，支持单设备或多设备组合，如 cpu / gpu / npu / cpu,gpu / cpu,gpu,npu",
-    )
-    parser.add_argument("--vendor", choices=["auto", "nvidia", "intel"], default="auto", help="GPU厂商")
-    parser.add_argument("--reporter", choices=["console", "prometheus"], default="console", help="上报方式")
+    parser.add_argument("--mode", choices=["fixed", "havfs"], default="fixed")
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--vendor", choices=["auto", "nvidia", "intel"], default="auto")
+    parser.add_argument("--reporter", choices=["console", "prometheus"], default="console")
     parser.add_argument("--fixed-interval", type=float, default=2.0)
     parser.add_argument("--t-min", type=float, default=0.5)
     parser.add_argument("--t-max", type=float, default=5.0)
@@ -48,7 +101,7 @@ def parse_args():
     parser.add_argument("--output", type=str, default="experiments/test.csv")
     parser.add_argument("--event-output", type=str, default="experiments/events.csv")
     parser.add_argument("--outbox-db", type=str, default="experiments/outbox.db")
-    parser.add_argument("--remote-endpoint", type=str, default="", help="云侧接收端点（HTTP POST）")
+    parser.add_argument("--remote-endpoint", type=str, default="")
     parser.add_argument("--retry-batch-size", type=int, default=50)
     parser.add_argument("--retry-max-attempts", type=int, default=8)
     return parser.parse_args()
@@ -59,75 +112,103 @@ def parse_devices(device_arg: str):
     valid = {"cpu", "gpu", "npu"}
     invalid = [d for d in devices if d not in valid]
     if invalid:
-        raise ValueError(f"不支持的设备类型: {invalid}，仅支持 {sorted(valid)}")
+        raise ValueError(f"unsupported devices: {invalid}, supported={sorted(valid)}")
     return devices
 
 
-def build_collectors(devices, vendor):
-    collectors = {}
+def build_adapters(devices, vendor):
+    adapters = {}
     if "cpu" in devices:
-        collectors["cpu0"] = CPUCollector(device_id="cpu0")
+        adapters["cpu0"] = CPUAdapter(device_id="cpu0")
     if "gpu" in devices:
-        collectors["gpu0"] = GPUCollector(device_id="gpu0", vendor=vendor)
+        adapters["gpu0"] = GPUAdapter(device_id="gpu0", vendor=vendor)
     if "npu" in devices:
-        collectors["npu0"] = NPUCollector(device_id="npu0", card_id=0)
-    return collectors
+        adapters["npu0"] = NPUAdapter(device_id="npu0", card_id=0)
+    return adapters
 
 
-def collect_parallel(collectors, executor):
-    """复用外部传入的线程池进行并发采集"""
-    futures = {device_id: executor.submit(collector.collect) for device_id, collector in collectors.items()}
-    return {device_id: futures[device_id].result() for device_id in collectors}
+def build_samplers(adapters, args):
+    return {
+        device_id: DeviceSampler(
+            device_id=device_id,
+            adapter=adapter,
+            mode=args.mode,
+            fixed_interval=args.fixed_interval,
+            t_min=args.t_min,
+            t_max=args.t_max,
+            static_limit=80.0,
+        )
+        for device_id, adapter in adapters.items()
+    }
 
 
-def flush_outbox(outbox: SQLiteOutbox, uploader: HTTPUploader, batch_size: int, max_attempts: int):
-    if uploader is None:
-        return 0, 0
-
-    sent = 0
-    failed = 0
-    for row in outbox.fetch_due(limit=batch_size):
-        payload = json.loads(row["payload"])
-        attempts = row["attempts"] + 1
-        try:
-            uploader.upload(row["record_type"], payload)
-            outbox.mark_sent(row["id"])
-            sent += 1
-        except Exception as exc:  # noqa: BLE001
-            outbox.mark_retry(
-                row_id=row["id"],
-                attempts=attempts,
-                last_error=str(exc),
-                max_attempts=max_attempts,
-            )
-            failed += 1
-    return sent, failed
+def make_metric_payload(metrics, result, elapsed, wallclock, overhead_cpu, overhead_mem_mb):
+    return {
+        "timestamp": wallclock,
+        "time": elapsed,
+        "device_id": metrics.device_id,
+        "utilization": metrics.utilization,
+        "chip_temp_c": metrics.chip_temp_c,
+        "board_temp_c": metrics.board_temp_c,
+        "power_w": metrics.power_w,
+        "freq_mhz": metrics.freq_mhz,
+        "freq_cap_mhz": metrics.freq_cap_mhz,
+        "mem_total_mib": metrics.mem_total_mib,
+        "mem_used_mib": metrics.mem_used_mib,
+        "mem_util_percent": metrics.mem_util_percent,
+        "pcie_rx_MBps": metrics.pcie_rx_MBps,
+        "pcie_tx_MBps": metrics.pcie_tx_MBps,
+        "pstate": metrics.pstate,
+        "power_limit_w": metrics.power_limit_w,
+        "throttle_flag": metrics.throttle_flag,
+        "throttle_cause": metrics.throttle_cause,
+        "last_error_code": metrics.last_error_code,
+        "last_error_ts": metrics.last_error_ts,
+        "fan_rpm": metrics.fan_rpm,
+        "perf_per_watt": metrics.perf_per_watt,
+        "correctable_err_s": metrics.correctable_err_s,
+        "uncorrectable_err_s": metrics.uncorrectable_err_s,
+        "device_uptime_s": metrics.device_uptime_s,
+        "device_reset_count": metrics.device_reset_count,
+        "nv_throttle_reasons": metrics.nv_throttle_reasons,
+        "nv_ecc_correctable_total": metrics.nv_ecc_correctable_total,
+        "nv_ecc_ue_total": metrics.nv_ecc_ue_total,
+        "nv_mem_clock_mhz": metrics.nv_mem_clock_mhz,
+        "nv_graphics_clock_mhz": metrics.nv_graphics_clock_mhz,
+        "threads": metrics.threads,
+        "ctx_switch_rate": metrics.ctx_switch_rate,
+        "l3_cache_mib": metrics.l3_cache_mib,
+        "io_util_percent": metrics.io_util_percent,
+        "duty_cycle_percent": metrics.duty_cycle_percent,
+        "collect_ts": metrics.collect_ts,
+        "sample_interval_s": metrics.sample_interval_s,
+        "risk_score": result.risk,
+        "risk_anomaly": result.risk_anomaly,
+        "risk_jump": result.risk_jump,
+        "risk_pressure": result.risk_pressure,
+        "risk_drift": result.risk_drift,
+        "interval": result.interval,
+        "state": result.state,
+        "sampled_slow": result.sampled_slow,
+        "overhead_cpu": overhead_cpu,
+        "overhead_mem_mb": overhead_mem_mb,
+        "status": metrics.status,
+        "error": metrics.error,
+    }
 
 
 def main():
     os.system("cls" if os.name == "nt" else "clear")
-    print(f"\n>>> 毕设实验系统启动 [PID: {os.getpid()}]")
+    print(f"\n>>>Experiment started [PID: {os.getpid()}]")
 
     args = parse_args()
     devices = parse_devices(args.device)
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     os.makedirs(os.path.dirname(args.event_output), exist_ok=True)
 
-    collectors = build_collectors(devices, args.vendor)
-    print(f"[信息] 启用设备: {', '.join(collectors.keys())}")
-
-    if args.mode == "havfs":
-        if len(collectors) == 1:
-            scheduler = HAVFS(t_min=args.t_min, t_max=args.t_max, static_limit=80.0)
-        else:
-            scheduler = UnifiedScheduler(
-                device_ids=list(collectors.keys()),
-                t_min=args.t_min,
-                t_max=args.t_max,
-                static_limit=80.0,
-            )
-    else:
-        scheduler = None
+    adapters = build_adapters(devices, args.vendor)
+    samplers = build_samplers(adapters, args)
+    print(f"[Info] enabled devices: {', '.join(samplers.keys())}")
 
     if args.reporter == "prometheus":
         if PrometheusReporter is None:
@@ -135,287 +216,83 @@ def main():
         reporter = PrometheusReporter(port=8000)
     else:
         reporter = ConsoleReporter()
+
     outbox = SQLiteOutbox(args.outbox_db)
     uploader = HTTPUploader(args.remote_endpoint) if args.remote_endpoint else None
-
     process = psutil.Process(os.getpid())
-    start_time = time.time()
+    agent = EdgeAgent(
+        samplers=samplers,
+        outbox=outbox,
+        uploader=uploader,
+        wal_batch_size=max(10, args.retry_batch_size),
+        upload_batch_size=args.retry_batch_size,
+        retry_max_attempts=args.retry_max_attempts,
+    )
 
     with open(args.output, "w", newline="", encoding="utf-8-sig") as f, open(
         args.event_output, "w", newline="", encoding="utf-8-sig"
     ) as ef:
-        writer = csv.writer(f)
-        event_writer = csv.writer(ef)
+        writer = csv.DictWriter(f, fieldnames=METRIC_HEADERS)
+        event_writer = csv.DictWriter(ef, fieldnames=EVENT_HEADERS)
+        writer.writeheader()
+        event_writer.writeheader()
 
-        writer.writerow(
-            [
-                "timestamp",
-                "time",
-                "device_id",
-                "utilization",
-                "chip_temp_c",
-                "board_temp_c",
-                "power_w",
-                "freq_mhz",
-                "freq_cap_mhz",
-                "mem_total_mib",
-                "mem_used_mib",
-                "mem_util_percent",
-                "pcie_rx_MBps",
-                "pcie_tx_MBps",
-                "pstate",
-                "power_limit_w",
-                "throttle_flag",
-                "throttle_cause",
-                "last_error_code",
-                "last_error_ts",
-                "fan_rpm",
-                "perf_per_watt",
-                "correctable_err_s",
-                "uncorrectable_err_s",
-                "device_uptime_s",
-                "device_reset_count",
-                "nv_throttle_reasons",
-                "nv_ecc_correctable_total",
-                "nv_ecc_ue_total",
-                "nv_mem_clock_mhz",
-                "nv_graphics_clock_mhz",
-                "threads",
-                "ctx_switch_rate",
-                "l3_cache_mib",
-                "io_util_percent",
-                "duty_cycle_percent",
-                "collect_ts",
-                "sample_interval_s",
-                "risk_score",
-                "interval",
-                "state",
-                "overhead_cpu",
-                "overhead_mem_mb",
-                "status",
-                "error",
-            ]
-        )
-        event_writer.writerow(
-            [
-                "timestamp",
-                "time",
-                "device_id",
-                "event_type",
-                "severity",
-                "message",
-                "detail",
-            ]
-        )
+        def on_metric(result, elapsed, wallclock):
+            metrics = result.metrics
+            overhead_cpu = process.cpu_percent(interval=None)
+            overhead_mem_mb = process.memory_info().rss / 1024 / 1024
+            metric_payload = make_metric_payload(
+                metrics=metrics,
+                result=result,
+                elapsed=elapsed,
+                wallclock=wallclock,
+                overhead_cpu=overhead_cpu,
+                overhead_mem_mb=overhead_mem_mb,
+            )
+            writer.writerow(metric_payload)
+
+            if PrometheusReporter is not None and isinstance(reporter, PrometheusReporter):
+                reporter.send(metrics, result.risk, result.interval)
+
+            print(
+                f"[{wallclock}] {metrics.device_id:<4} | util={metrics.utilization:6.2f}% | "
+                f"temp={metrics.chip_temp_c if metrics.chip_temp_c is not None else 'NA'} | "
+                f"power={metrics.power_w if metrics.power_w is not None else 'NA'} | "
+                f"risk={result.risk:6.2f} | interval={result.interval:4.2f}s | "
+                f"state={result.state} | slow={result.sampled_slow} | status={metrics.status}"
+            )
+            return [("metric", metric_payload)]
+
+        def on_event(result, elapsed, wallclock):
+            event_payload = {
+                "timestamp": wallclock,
+                "time": elapsed,
+                "device_id": result.metrics.device_id,
+                "event_type": "collector_unavailable",
+                "severity": "high",
+                "message": result.metrics.error or "collector unavailable",
+                "detail": result.metrics.summary(),
+            }
+            event_writer.writerow(event_payload)
+            return [("event", event_payload)]
+
+        def on_cycle_end(_results, _interval):
+            pending, dead = outbox.stats()
+            if uploader is not None:
+                print(f"[OUTBOX] pending={pending}, dead={dead}")
 
         try:
-            with ThreadPoolExecutor(max_workers=max(1, len(collectors))) as executor:
-                while time.time() - start_time < args.duration:
-                    metrics_map = collect_parallel(collectors, executor)
-                    schedule_input = {
-                        device_id: metrics
-                        for device_id, metrics in metrics_map.items()
-                        if metrics.status == "ok"
-                    }
-
-                    if args.mode == "fixed":
-                        global_interval = args.fixed_interval
-                        schedule_detail = {
-                            "global_risk": 0.0,
-                            "per_device": {
-                                device_id: {
-                                    "interval": args.fixed_interval,
-                                    "risk": 0.0,
-                                    "state": "固定频率",
-                                }
-                                for device_id in collectors
-                            },
-                        }
-                    else:
-                        if not schedule_input:
-                            global_interval = args.t_min
-                            schedule_detail = {
-                                "global_risk": 100.0,
-                                "per_device": {
-                                    device_id: {
-                                        "interval": args.t_min,
-                                        "risk": 100.0,
-                                        "state": "设备不可用(快速重试)",
-                                    }
-                                    for device_id in collectors
-                                },
-                            }
-                        elif isinstance(scheduler, UnifiedScheduler):
-                            global_interval, schedule_detail = scheduler.update(schedule_input)
-                            for device_id in collectors:
-                                if device_id not in schedule_detail["per_device"]:
-                                    schedule_detail["per_device"][device_id] = {
-                                        "interval": args.t_min,
-                                        "risk": 100.0,
-                                        "state": "设备不可用(快速重试)",
-                                    }
-                        else:
-                            only_id = list(schedule_input.keys())[0]
-                            interval, risk, state = scheduler.update(schedule_input[only_id])
-                            global_interval = interval
-                            schedule_detail = {
-                                "global_risk": risk,
-                                "per_device": {only_id: {"interval": interval, "risk": risk, "state": state}},
-                            }
-                            for device_id in collectors:
-                                if device_id not in schedule_detail["per_device"]:
-                                    schedule_detail["per_device"][device_id] = {
-                                        "interval": args.t_min,
-                                        "risk": 100.0,
-                                        "state": "设备不可用(快速重试)",
-                                    }
-
-                    self_cpu = process.cpu_percent(interval=None)
-                    self_mem = process.memory_info().rss / 1024 / 1024
-                    now = round(time.time() - start_time, 2)
-                    current_time_str = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-
-                    for device_id, metrics in metrics_map.items():
-                        detail = schedule_detail["per_device"][device_id]
-
-                        if metrics.status != "ok":
-                            event_payload = {
-                                "timestamp": current_time_str,
-                                "time": now,
-                                "device_id": metrics.device_id,
-                                "event_type": "collector_unavailable",
-                                "severity": "high",
-                                "message": metrics.error or "collector unavailable",
-                                "detail": metrics.summary(),
-                            }
-                            event_writer.writerow(event_payload.values())
-                            outbox.enqueue("event", event_payload)
-
-                        if PrometheusReporter is not None and isinstance(reporter, PrometheusReporter):
-                            reporter.send(metrics, detail["risk"], detail["interval"])
-
-                        metric_payload = {
-                            "timestamp": current_time_str,
-                            "time": now,
-                            "device_id": metrics.device_id,
-                            "utilization": metrics.utilization,
-                            "chip_temp_c": metrics.chip_temp_c,
-                            "board_temp_c": metrics.board_temp_c,
-                            "power_w": metrics.power_w,
-                            "freq_mhz": metrics.freq_mhz,
-                            "freq_cap_mhz": metrics.freq_cap_mhz,
-                            "mem_total_mib": metrics.mem_total_mib,
-                            "mem_used_mib": metrics.mem_used_mib,
-                            "mem_util_percent": metrics.mem_util_percent,
-                            "pcie_rx_MBps": metrics.pcie_rx_MBps,
-                            "pcie_tx_MBps": metrics.pcie_tx_MBps,
-                            "pstate": metrics.pstate,
-                            "power_limit_w": metrics.power_limit_w,
-                            "throttle_flag": metrics.throttle_flag,
-                            "throttle_cause": metrics.throttle_cause,
-                            "last_error_code": metrics.last_error_code,
-                            "last_error_ts": metrics.last_error_ts,
-                            "fan_rpm": metrics.fan_rpm,
-                            "perf_per_watt": metrics.perf_per_watt,
-                            "correctable_err_s": metrics.correctable_err_s,
-                            "uncorrectable_err_s": metrics.uncorrectable_err_s,
-                            "device_uptime_s": metrics.device_uptime_s,
-                            "device_reset_count": metrics.device_reset_count,
-                            "nv_throttle_reasons": metrics.nv_throttle_reasons,
-                            "nv_ecc_correctable_total": metrics.nv_ecc_correctable_total,
-                            "nv_ecc_ue_total": metrics.nv_ecc_ue_total,
-                            "nv_mem_clock_mhz": metrics.nv_mem_clock_mhz,
-                            "nv_graphics_clock_mhz": metrics.nv_graphics_clock_mhz,
-                            "threads": metrics.threads,
-                            "ctx_switch_rate": metrics.ctx_switch_rate,
-                            "l3_cache_mib": metrics.l3_cache_mib,
-                            "io_util_percent": metrics.io_util_percent,
-                            "duty_cycle_percent": metrics.duty_cycle_percent,
-                            "collect_ts": metrics.collect_ts,
-                            "sample_interval_s": metrics.sample_interval_s,
-                            "risk_score": detail["risk"],
-                            "interval": detail["interval"],
-                            "state": detail["state"],
-                            "status": metrics.status,
-                            "error": metrics.error,
-                        }
-                        outbox.enqueue("metric", metric_payload)
-
-                        writer.writerow(
-                            [
-                                current_time_str,
-                                now,
-                                metrics.device_id,
-                                metrics.utilization,
-                                metrics.chip_temp_c,
-                                metrics.board_temp_c,
-                                metrics.power_w,
-                                metrics.freq_mhz,
-                                metrics.freq_cap_mhz,
-                                metrics.mem_total_mib,
-                                metrics.mem_used_mib,
-                                metrics.mem_util_percent,
-                                metrics.pcie_rx_MBps,
-                                metrics.pcie_tx_MBps,
-                                metrics.pstate,
-                                metrics.power_limit_w,
-                                metrics.throttle_flag,
-                                metrics.throttle_cause,
-                                metrics.last_error_code,
-                                metrics.last_error_ts,
-                                metrics.fan_rpm,
-                                metrics.perf_per_watt,
-                                metrics.correctable_err_s,
-                                metrics.uncorrectable_err_s,
-                                metrics.device_uptime_s,
-                                metrics.device_reset_count,
-                                metrics.nv_throttle_reasons,
-                                metrics.nv_ecc_correctable_total,
-                                metrics.nv_ecc_ue_total,
-                                metrics.nv_mem_clock_mhz,
-                                metrics.nv_graphics_clock_mhz,
-                                metrics.threads,
-                                metrics.ctx_switch_rate,
-                                metrics.l3_cache_mib,
-                                metrics.io_util_percent,
-                                metrics.duty_cycle_percent,
-                                metrics.collect_ts,
-                                metrics.sample_interval_s,
-                                detail["risk"],
-                                detail["interval"],
-                                detail["state"],
-                                self_cpu,
-                                self_mem,
-                                metrics.status,
-                                metrics.error,
-                            ]
-                        )
-
-                        print(
-                            f"[{current_time_str}] {device_id:<4} | util={metrics.utilization:6.2f}% | "
-                            f"temp={metrics.chip_temp_c if metrics.chip_temp_c is not None else 'NA'} | "
-                            f"power={metrics.power_w if metrics.power_w is not None else 'NA'} | "
-                            f"risk={detail['risk']:6.2f} | interval={detail['interval']:4.2f}s | "
-                            f"state={detail['state']} | status={metrics.status}"
-                        )
-
-                    sent, failed = flush_outbox(
-                        outbox=outbox,
-                        uploader=uploader,
-                        batch_size=args.retry_batch_size,
-                        max_attempts=args.retry_max_attempts,
-                    )
-                    pending, dead = outbox.stats()
-                    if uploader is not None:
-                        print(f"[OUTBOX] sent={sent}, failed={failed}, pending={pending}, dead={dead}")
-
-                    time.sleep(global_interval)
-
+            agent.run(
+                duration=args.duration,
+                on_metric=on_metric,
+                on_event=on_event,
+                on_cycle_end=on_cycle_end,
+            )
         except KeyboardInterrupt:
-            print("\n[用户中断] 实验提前结束。")
+            print("\n[Interrupted] experiment stopped early.")
 
     outbox.close()
-    print(f">>> 实验结束. 指标数据: {args.output} | 事件数据: {args.event_output} | 队列DB: {args.outbox_db}")
+    print(f">>> experiment finished. metrics={args.output} events={args.event_output} outbox={args.outbox_db}")
 
 
 if __name__ == "__main__":

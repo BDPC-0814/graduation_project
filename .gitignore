@@ -1,6 +1,46 @@
-venv/
-__pycache__/
-*.pyc
-experiments/*.csv
-experiments/*.png
+# Editor / OS
 .vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python environments and caches
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Node / frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+
+# Local databases and WAL files
+*.db
+*.db-shm
+*.db-wal
+
+# Logs and local runtime output
+*.log
+*.out
+*.err
+
+# Experiment artifacts
+experiments/**/*.csv
+experiments/**/*.png
+experiments/**/*.jsonl
+experiments/**/*.txt
+
+# Keep source-controlled data files
+!demo/data/*.csv
