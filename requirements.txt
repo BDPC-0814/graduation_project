@@ -1,3 +1,4 @@
 psutil
 prometheus_client
 nvidia-ml-py
+matplotlib

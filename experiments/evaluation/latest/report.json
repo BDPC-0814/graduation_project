@@ -1,0 +1,328 @@
+{
+  "generated_at": "2026-03-19T22:01:35",
+  "inputs": {
+    "fixed": "experiments\\fixed_data.csv",
+    "havfs": "experiments\\havfs_data.csv"
+  },
+  "parameters": {
+    "redundancy_value_threshold": 1.0,
+    "redundancy_time_window": 5.0,
+    "rolling_window": 5,
+    "latency_change_threshold": 5.0,
+    "latency_high_quantile": 0.85,
+    "latency_reaction_window": 12.0,
+    "latency_interval_drop_ratio": 0.15
+  },
+  "summary": {
+    "sample_count": {
+      "fixed": 10,
+      "havfs": 4,
+      "reduction_percent": 60.0
+    },
+    "redundancy_rate_percent": {
+      "fixed": 0.0,
+      "havfs": 0.0
+    },
+    "interval_stats_s": {
+      "fixed": {
+        "mean_s": 1.0,
+        "median_s": 1.0,
+        "std_s": 0.0,
+        "min_s": 1.0,
+        "max_s": 1.0,
+        "p95_s": 1.0
+      },
+      "havfs": {
+        "mean_s": 4.8338,
+        "median_s": 4.8308,
+        "std_s": 0.0367,
+        "min_s": 4.7887,
+        "max_s": 4.8848,
+        "p95_s": 4.8796
+      }
+    },
+    "overhead_stats": {
+      "fixed": {
+        "cpu_mean_percent": 5.04,
+        "cpu_p95_percent": 24.564999999999998,
+        "mem_mean_mb": 29.557,
+        "mem_p95_mb": 29.60546875
+      },
+      "havfs": {
+        "cpu_mean_percent": 0.125,
+        "cpu_p95_percent": 0.2699999999999999,
+        "mem_mean_mb": 28.8486,
+        "mem_p95_mb": 28.90234375
+      }
+    },
+    "latency_stats_s": {
+      "fixed": {
+        "count": 9,
+        "p50_s": 4.93,
+        "p95_s": 9.159999999999997,
+        "mean_s": 5.4511
+      },
+      "havfs": {
+        "count": 2,
+        "p50_s": 4.848205415000001,
+        "p95_s": 4.881140541500001,
+        "mean_s": 4.8482
+      }
+    }
+  },
+  "latency_detection": {
+    "fixed": {
+      "high_util_threshold": 13.3
+    },
+    "havfs": {
+      "high_util_threshold": 12.8
+    }
+  },
+  "charts": {
+    "utilization_time": {
+      "title": "利用率-时间曲线",
+      "labels": [
+        "11.65s",
+        "11.97s",
+        "22.97s",
+        "26.50s",
+        "27.75s",
+        "32.68s",
+        "38.86s",
+        "41.33s",
+        "43.76s",
+        "48.72s",
+        "53.63s",
+        "56.35s",
+        "58.23s",
+        "64.63s"
+      ],
+      "series": [
+        {
+          "name": "固定频率",
+          "data": [
+            null,
+            20.6,
+            0.7,
+            null,
+            14.7,
+            7.9,
+            2.8,
+            null,
+            9.4,
+            1.4,
+            2.5,
+            null,
+            10.7,
+            0.8
+          ]
+        },
+        {
+          "name": "HAVFS",
+          "data": [
+            12.8,
+            null,
+            null,
+            9.3,
+            null,
+            null,
+            null,
+            10.6,
+            null,
+            null,
+            null,
+            12.8,
+            null,
+            null
+          ]
+        }
+      ],
+      "y_axis_name": "利用率 (%)"
+    },
+    "interval_time": {
+      "title": "采样间隔-时间曲线",
+      "labels": [
+        "11.65s",
+        "11.97s",
+        "22.97s",
+        "26.50s",
+        "27.75s",
+        "32.68s",
+        "38.86s",
+        "41.33s",
+        "43.76s",
+        "48.72s",
+        "53.63s",
+        "56.35s",
+        "58.23s",
+        "64.63s"
+      ],
+      "series": [
+        {
+          "name": "固定频率",
+          "data": [
+            null,
+            1.0,
+            1.0,
+            null,
+            1.0,
+            1.0,
+            1.0,
+            null,
+            1.0,
+            1.0,
+            1.0,
+            null,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "name": "HAVFS",
+          "data": [
+            4.8848,
+            null,
+            null,
+            4.7887,
+            null,
+            null,
+            null,
+            4.85,
+            null,
+            null,
+            null,
+            4.8116,
+            null,
+            null
+          ]
+        }
+      ],
+      "y_axis_name": "采样间隔 (s)"
+    },
+    "latency_cdf": {
+      "title": "延迟 CDF 曲线",
+      "labels": [
+        "1.00s",
+        "4.78s",
+        "4.81s",
+        "4.88s",
+        "4.90s",
+        "4.91s",
+        "4.93s",
+        "4.96s",
+        "6.18s",
+        "6.40s",
+        "11.00s"
+      ],
+      "series": [
+        {
+          "name": "固定频率",
+          "data": [
+            11.1111,
+            11.1111,
+            22.2222,
+            22.2222,
+            33.3333,
+            33.3333,
+            55.5556,
+            55.5556,
+            77.7778,
+            88.8889,
+            100.0
+          ]
+        },
+        {
+          "name": "HAVFS",
+          "data": [
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0
+          ]
+        }
+      ],
+      "y_axis_name": "累计概率 (%)"
+    },
+    "redundancy_time": {
+      "title": "冗余率-时间曲线",
+      "labels": [
+        "11.65s",
+        "11.97s",
+        "22.97s",
+        "26.50s",
+        "27.75s",
+        "32.68s",
+        "38.86s",
+        "41.33s",
+        "43.76s",
+        "48.72s",
+        "53.63s",
+        "56.35s",
+        "58.23s",
+        "64.63s"
+      ],
+      "series": [
+        {
+          "name": "固定频率",
+          "data": [
+            null,
+            0.0,
+            0.0,
+            null,
+            0.0,
+            0.0,
+            0.0,
+            null,
+            0.0,
+            0.0,
+            0.0,
+            null,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "HAVFS",
+          "data": [
+            0.0,
+            null,
+            null,
+            0.0,
+            null,
+            null,
+            null,
+            0.0,
+            null,
+            null,
+            null,
+            0.0,
+            null,
+            null
+          ]
+        }
+      ],
+      "y_axis_name": "冗余率 (%)"
+    }
+  },
+  "files": {
+    "summary_csv": "summary_metrics.csv",
+    "interval_csv": "interval_stats.csv",
+    "timeseries_csv": "timeseries_metrics.csv",
+    "latency_csv": "latency_samples.csv",
+    "json_report": "report.json",
+    "markdown_report": "report.md",
+    "figures": {
+      "utilization_time": "figures/utilization_time.png",
+      "interval_time": "figures/interval_time.png",
+      "latency_cdf": "figures/latency_cdf.png",
+      "latency_boxplot": "figures/latency_boxplot.png"
+    }
+  }
+}

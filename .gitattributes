@@ -1,0 +1,39 @@
+# Normalize text files in the repository while keeping platform-specific
+# scripts on their expected line endings.
+* text=auto
+
+# Source code and docs should stay LF across platforms.
+*.py text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.sh text eol=lf
+*.env text eol=lf
+Dockerfile text eol=lf
+
+# Windows scripts are easier to use with CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat common binary assets as binary to avoid line-ending conversion.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.nupkg binary
+*.dll binary
+*.exe binary
+*.db binary
+*.db-shm binary
+*.db-wal binary
+*.tsbuildinfo binary
