@@ -48,12 +48,25 @@ export type LogRecord = {
   timestamp?: string | null;
 };
 
+export type EventRecord = {
+  timestamp?: string | null;
+  time?: number | null;
+  device_id: string;
+  event_type: string;
+  severity: string;
+  message: string;
+  detail?: string | null;
+  source?: string | null;
+};
+
 export type DashboardOverview = {
   device_total: number;
   online_count: number;
   high_risk_count: number;
   avg_interval: number;
   active_alerts: number;
+  event_total: number;
+  elevated_event_total: number;
   outbox_pending: number;
   outbox_dead: number;
   latest_realtime: RealtimeMetric[];

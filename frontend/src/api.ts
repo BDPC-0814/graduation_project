@@ -2,6 +2,7 @@ import type {
   CompareHistoryResponse,
   DashboardOverview,
   DeviceSummary,
+  EventRecord,
   ExperimentEvaluationReport,
   HistoryResponse,
   LogRecord,
@@ -35,5 +36,15 @@ export const api = {
       `/api/metrics/compare?device_ids=${encodeURIComponent(deviceIds.join(","))}&limit=${limit}`
     ),
   getLogs: (limit = 80) => fetchJson<LogRecord[]>(`/api/metrics/logs?limit=${limit}`),
+  getEvents: (limit = 100, deviceId?: string, severity?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (deviceId) {
+      params.set("device_id", deviceId);
+    }
+    if (severity) {
+      params.set("severity", severity);
+    }
+    return fetchJson<EventRecord[]>(`/api/events?${params.toString()}`);
+  },
   getExperimentEvaluation: () => fetchJson<ExperimentEvaluationReport>("/api/experiments/evaluation"),
 };

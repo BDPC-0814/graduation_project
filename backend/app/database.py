@@ -174,29 +174,7 @@ class DatabaseService:
                 """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_events_device_id ON events(device_id, id)")
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS alerts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    device_id TEXT NOT NULL,
-                    rule_key TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    first_seen_at REAL NOT NULL,
-                    last_seen_at REAL NOT NULL,
-                    acknowledged_by TEXT,
-                    acknowledged_at REAL,
-                    silenced_until REAL,
-                    closed_at REAL,
-                    event_count INTEGER NOT NULL DEFAULT 1,
-                    last_value REAL,
-                    UNIQUE(device_id, rule_key, status)
-                )
-                """
-            )
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_active ON alerts(status, last_seen_at DESC)")
+            self._ensure_alerts_schema(cur)
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS alert_rules (
@@ -216,6 +194,112 @@ class DatabaseService:
             )
             self.conn.commit()
         self._seed_default_rules()
+
+    def _alerts_table_sql(self, cur: sqlite3.Cursor) -> Optional[str]:
+        row = cur.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'alerts'"
+        ).fetchone()
+        return row[0] if row is not None else None
+
+    def _create_alerts_table(self, cur: sqlite3.Cursor):
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                rule_key TEXT NOT NULL,
+                title TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                status TEXT NOT NULL,
+                message TEXT NOT NULL,
+                first_seen_at REAL NOT NULL,
+                last_seen_at REAL NOT NULL,
+                acknowledged_by TEXT,
+                acknowledged_at REAL,
+                silenced_until REAL,
+                closed_at REAL,
+                event_count INTEGER NOT NULL DEFAULT 1,
+                last_value REAL
+            )
+            """
+        )
+
+    def _migrate_alerts_table(self, cur: sqlite3.Cursor):
+        cur.execute("ALTER TABLE alerts RENAME TO alerts_legacy")
+        self._create_alerts_table(cur)
+        cur.execute(
+            """
+            INSERT INTO alerts (
+                id, device_id, rule_key, title, severity, status, message,
+                first_seen_at, last_seen_at, acknowledged_by, acknowledged_at,
+                silenced_until, closed_at, event_count, last_value
+            )
+            SELECT
+                id, device_id, rule_key, title, severity, status, message,
+                first_seen_at, last_seen_at, acknowledged_by, acknowledged_at,
+                silenced_until, closed_at, event_count, last_value
+            FROM alerts_legacy
+            ORDER BY id
+            """
+        )
+        cur.execute("DROP TABLE alerts_legacy")
+
+    def _normalize_active_alert_rows(self, cur: sqlite3.Cursor):
+        duplicate_groups = cur.execute(
+            """
+            SELECT device_id, rule_key, COUNT(*) AS active_count
+            FROM alerts
+            WHERE status IN ('open', 'acknowledged', 'silenced')
+            GROUP BY device_id, rule_key
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+
+        for row in duplicate_groups:
+            active_rows = cur.execute(
+                """
+                SELECT id, status, last_seen_at, closed_at
+                FROM alerts
+                WHERE device_id = ? AND rule_key = ? AND status IN ('open', 'acknowledged', 'silenced')
+                ORDER BY last_seen_at DESC, id DESC
+                """,
+                (row["device_id"], row["rule_key"]),
+            ).fetchall()
+            keep_row = active_rows[0]
+            resolve_ids = [item["id"] for item in active_rows[1:]]
+            if not resolve_ids:
+                continue
+            placeholders = ",".join("?" for _ in resolve_ids)
+            cur.execute(
+                f"""
+                UPDATE alerts
+                SET status = 'resolved',
+                    closed_at = COALESCE(closed_at, last_seen_at)
+                WHERE id IN ({placeholders})
+                """,
+                resolve_ids,
+            )
+
+    def _ensure_alert_indexes(self, cur: sqlite3.Cursor):
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_active ON alerts(status, last_seen_at DESC)")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_active_unique
+            ON alerts(device_id, rule_key)
+            WHERE status IN ('open', 'acknowledged', 'silenced')
+            """
+        )
+
+    def _ensure_alerts_schema(self, cur: sqlite3.Cursor):
+        alerts_sql = self._alerts_table_sql(cur)
+        if alerts_sql is None:
+            self._create_alerts_table(cur)
+        else:
+            normalized_sql = "".join(alerts_sql.split()).upper()
+            if "UNIQUE(DEVICE_ID,RULE_KEY,STATUS)" in normalized_sql:
+                self._migrate_alerts_table(cur)
+        self._normalize_active_alert_rows(cur)
+        self._ensure_alert_indexes(cur)
 
     def _seed_default_rules(self):
         default_rules = [
@@ -785,6 +869,18 @@ class DatabaseService:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def get_event_totals(self) -> Tuple[int, int]:
+        with self._lock:
+            row = self.conn.execute(
+                """
+                SELECT
+                    COUNT(1) AS event_total,
+                    SUM(CASE WHEN LOWER(severity) IN ('high', 'medium') THEN 1 ELSE 0 END) AS elevated_event_total
+                FROM events
+                """
+            ).fetchone()
+        return int(row["event_total"] or 0), int(row["elevated_event_total"] or 0)
+
     def list_alerts(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
         query = """
             SELECT id, device_id, rule_key, title, severity, status, message,
@@ -910,6 +1006,7 @@ class DatabaseService:
         intervals = [item["sample_interval_s"] for item in realtime if item["sample_interval_s"] is not None]
         avg_interval = round(sum(intervals) / len(intervals), 2) if intervals else 0.0
         active_alerts = len([item for item in self.list_alerts() if item["status"] in ("open", "acknowledged", "silenced")])
+        event_total, elevated_event_total = self.get_event_totals()
         pending, dead = self.get_outbox_stats()
         return {
             "device_total": device_total,
@@ -917,6 +1014,8 @@ class DatabaseService:
             "high_risk_count": high_risk_count,
             "avg_interval": avg_interval,
             "active_alerts": active_alerts,
+            "event_total": event_total,
+            "elevated_event_total": elevated_event_total,
             "outbox_pending": pending,
             "outbox_dead": dead,
             "latest_realtime": realtime,

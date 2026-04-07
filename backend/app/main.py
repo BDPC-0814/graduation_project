@@ -10,6 +10,7 @@ from .data_service import (
     get_compare_history,
     get_dashboard_overview,
     get_devices,
+    get_events,
     get_experiment_evaluation_report,
     get_history,
     get_recent_logs,
@@ -20,6 +21,7 @@ from .schemas import (
     CompareHistoryResponse,
     DashboardOverview,
     DeviceSummary,
+    EventRecord,
     HistoryResponse,
     LogRecord,
     RealtimeMetric,
@@ -100,6 +102,15 @@ def compare_history(
 @app.get("/api/metrics/logs", response_model=list[LogRecord])
 def metric_logs(limit: int = Query(80, ge=10, le=500)):
     return get_recent_logs(limit=limit)
+
+
+@app.get("/api/events", response_model=list[EventRecord])
+def list_events(
+    device_id: Optional[str] = Query(None, description="Optional device identifier"),
+    severity: Optional[str] = Query(None, description="Optional severity filter"),
+    limit: int = Query(100, ge=10, le=500),
+):
+    return get_events(device_id=device_id, severity=severity, limit=limit)
 
 
 @app.get("/api/scheduler/config", response_model=SchedulerConfig)

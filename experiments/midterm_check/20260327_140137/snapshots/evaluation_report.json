@@ -1,0 +1,235 @@
+﻿{
+    "generated_at":  "2026-03-27T14:03:11",
+    "inputs":  {
+                   "fixed":  "C:\\Users\\86139\\Documents\\GitHub\\graduation_project\\experiments\\midterm_check\\20260327_140137\\data\\fixed_metrics.csv",
+                   "havfs":  "C:\\Users\\86139\\Documents\\GitHub\\graduation_project\\experiments\\midterm_check\\20260327_140137\\data\\havfs_metrics.csv"
+               },
+    "parameters":  {
+                       "redundancy_value_threshold":  1.0,
+                       "redundancy_time_window":  5.0,
+                       "rolling_window":  5,
+                       "latency_change_threshold":  5.0,
+                       "latency_high_quantile":  0.85,
+                       "latency_reaction_window":  12.0,
+                       "latency_interval_drop_ratio":  0.15
+                   },
+    "summary":  {
+                    "sample_count":  {
+                                         "fixed":  6,
+                                         "havfs":  6,
+                                         "reduction_percent":  0.0
+                                     },
+                    "redundancy_rate_percent":  {
+                                                    "fixed":  0.0,
+                                                    "havfs":  0.0
+                                                },
+                    "interval_stats_s":  {
+                                             "fixed":  {
+                                                           "mean_s":  5.0,
+                                                           "median_s":  5.0,
+                                                           "std_s":  0.0,
+                                                           "min_s":  5.0,
+                                                           "max_s":  5.0,
+                                                           "p95_s":  5.0
+                                                       },
+                                             "havfs":  {
+                                                           "mean_s":  4.4835,
+                                                           "median_s":  4.5255,
+                                                           "std_s":  0.3523,
+                                                           "min_s":  3.9398,
+                                                           "max_s":  4.9728,
+                                                           "p95_s":  4.9269
+                                                       }
+                                         },
+                    "overhead_stats":  {
+                                           "fixed":  {
+                                                         "cpu_mean_percent":  0.1167,
+                                                         "cpu_p95_percent":  0.425,
+                                                         "mem_mean_mb":  30.2917,
+                                                         "mem_p95_mb":  30.97265625
+                                                     },
+                                           "havfs":  {
+                                                         "cpu_mean_percent":  0.1167,
+                                                         "cpu_p95_percent":  0.375,
+                                                         "mem_mean_mb":  30.3757,
+                                                         "mem_p95_mb":  31.03125
+                                                     }
+                                       },
+                    "latency_stats_s":  {
+                                            "fixed":  {
+                                                          "count":  3,
+                                                          "p50_s":  5.0,
+                                                          "p95_s":  5.0,
+                                                          "mean_s":  5.0
+                                                      },
+                                            "havfs":  {
+                                                          "count":  3,
+                                                          "p50_s":  4.525343503736239,
+                                                          "p95_s":  4.928047498034427,
+                                                          "mean_s":  4.5487
+                                                      }
+                                        }
+                },
+    "latency_detection":  {
+                              "fixed":  {
+                                            "high_util_threshold":  33.225
+                                        },
+                              "havfs":  {
+                                            "high_util_threshold":  27.8
+                                        }
+                          },
+    "charts":  {
+                   "utilization_time":  {
+                                            "title":  "Utilization Over Time",
+                                            "labels":  [
+                                                           "8.30s",
+                                                           "8.56s",
+                                                           "21.85s",
+                                                           "21.98s",
+                                                           "34.38s",
+                                                           "35.07s"
+                                                       ],
+                                            "series":  [
+                                                           {
+                                                               "name":  "Fixed Frequency",
+                                                               "data":  [
+                                                                            null,
+                                                                            4.3038,
+                                                                            null,
+                                                                            3.6949,
+                                                                            null,
+                                                                            2.2931
+                                                                        ]
+                                                           },
+                                                           {
+                                                               "name":  "HAVFS",
+                                                               "data":  [
+                                                                            3.0231,
+                                                                            null,
+                                                                            15.2925,
+                                                                            null,
+                                                                            3.6343,
+                                                                            null
+                                                                        ]
+                                                           }
+                                                       ],
+                                            "y_axis_name":  "Utilization (%)"
+                                        },
+                   "interval_time":  {
+                                         "title":  "Effective Sampling Interval",
+                                         "labels":  [
+                                                        "8.30s",
+                                                        "8.56s",
+                                                        "21.85s",
+                                                        "21.98s",
+                                                        "34.38s",
+                                                        "35.07s"
+                                                    ],
+                                         "series":  [
+                                                        {
+                                                            "name":  "Fixed Frequency",
+                                                            "data":  [
+                                                                         null,
+                                                                         5.0,
+                                                                         null,
+                                                                         5.0,
+                                                                         null,
+                                                                         5.0
+                                                                     ]
+                                                        },
+                                                        {
+                                                            "name":  "HAVFS",
+                                                            "data":  [
+                                                                         4.9728,
+                                                                         null,
+                                                                         4.5256,
+                                                                         null,
+                                                                         4.5253,
+                                                                         null
+                                                                     ]
+                                                        }
+                                                    ],
+                                         "y_axis_name":  "Sampling Interval (s)"
+                                     },
+                   "latency_cdf":  {
+                                       "title":  "Latency CDF",
+                                       "labels":  [
+                                                      "4.15s",
+                                                      "4.53s",
+                                                      "4.97s",
+                                                      "5.00s"
+                                                  ],
+                                       "series":  [
+                                                      {
+                                                          "name":  "Fixed Frequency",
+                                                          "data":  [
+                                                                       0.0,
+                                                                       0.0,
+                                                                       0.0,
+                                                                       100.0
+                                                                   ]
+                                                      },
+                                                      {
+                                                          "name":  "HAVFS",
+                                                          "data":  [
+                                                                       33.3333,
+                                                                       33.3333,
+                                                                       100.0,
+                                                                       100.0
+                                                                   ]
+                                                      }
+                                                  ],
+                                       "y_axis_name":  "CDF (%)"
+                                   },
+                   "redundancy_time":  {
+                                           "title":  "Redundancy Score Over Time",
+                                           "labels":  [
+                                                          "8.30s",
+                                                          "8.56s",
+                                                          "21.85s",
+                                                          "21.98s",
+                                                          "34.38s",
+                                                          "35.07s"
+                                                      ],
+                                           "series":  [
+                                                          {
+                                                              "name":  "Fixed Frequency",
+                                                              "data":  [
+                                                                           null,
+                                                                           0.0,
+                                                                           null,
+                                                                           0.0,
+                                                                           null,
+                                                                           0.0
+                                                                       ]
+                                                          },
+                                                          {
+                                                              "name":  "HAVFS",
+                                                              "data":  [
+                                                                           0.0,
+                                                                           null,
+                                                                           0.0,
+                                                                           null,
+                                                                           0.0,
+                                                                           null
+                                                                       ]
+                                                          }
+                                                      ],
+                                           "y_axis_name":  "Redundancy (%)"
+                                       }
+               },
+    "files":  {
+                  "summary_csv":  "summary_metrics.csv",
+                  "interval_csv":  "interval_stats.csv",
+                  "timeseries_csv":  "timeseries_metrics.csv",
+                  "latency_csv":  "latency_samples.csv",
+                  "json_report":  "report.json",
+                  "markdown_report":  "report.md",
+                  "figures":  {
+                                  "utilization_time":  "figures/utilization_time.png",
+                                  "interval_time":  "figures/interval_time.png",
+                                  "latency_cdf":  "figures/latency_cdf.png",
+                                  "latency_boxplot":  "figures/latency_boxplot.png"
+                              }
+              }
+}

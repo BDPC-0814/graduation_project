@@ -67,7 +67,7 @@ def native_value(value: Any):
 
 
 def normalize_mode_name(mode: str):
-    return "HAVFS" if mode.lower() == "havfs" else "固定频率"
+    return "HAVFS" if mode.lower() == "havfs" else "Fixed Frequency"
 
 
 def load_dataset(path: str, mode: str):
@@ -267,7 +267,7 @@ def build_summary_rows(report_summary: dict[str, Any]):
     latency = report_summary["latency_stats_s"]
     overhead = report_summary["overhead_stats"]
 
-    rows = [
+    return [
         {
             "metric": "sample_count",
             "fixed": sample["fixed"],
@@ -318,7 +318,6 @@ def build_summary_rows(report_summary: dict[str, Any]):
             "unit": "MB",
         },
     ]
-    return rows
 
 
 def build_chart_payload(series_frames: dict[str, pd.DataFrame], value_column: str, title: str, y_axis_name: str):
@@ -351,15 +350,17 @@ def build_latency_cdf_chart(latency_frames: dict[str, pd.DataFrame]):
     series = []
 
     for mode, values in per_mode_values.items():
-        cdf_values = []
         if not values:
             cdf_values = [None for _ in labels]
         else:
             array = np.array(values)
-            cdf_values = [round_or_none(float(np.searchsorted(array, value, side="right") / len(array)) * 100.0, 4) for value in label_values]
+            cdf_values = [
+                round_or_none(float(np.searchsorted(array, value, side="right") / len(array)) * 100.0, 4)
+                for value in label_values
+            ]
         series.append({"name": normalize_mode_name(mode), "data": cdf_values})
 
-    return {"title": "延迟 CDF 曲线", "labels": labels, "series": series, "y_axis_name": "累计概率 (%)"}
+    return {"title": "Latency CDF", "labels": labels, "series": series, "y_axis_name": "CDF (%)"}
 
 
 def apply_plot_style():
@@ -406,7 +407,7 @@ def write_cdf_figure(path: Path, latency_frames: dict[str, pd.DataFrame], dpi: i
         cdf = np.arange(1, len(values) + 1) / len(values)
         ax.plot(values, cdf * 100.0, label=normalize_mode_name(mode), linewidth=2.2, color=palette.get(mode, None))
 
-    ax.set_title("延迟 CDF 曲线")
+    ax.set_title("Latency CDF")
     ax.set_xlabel("Latency (s)")
     ax.set_ylabel("CDF (%)")
     ax.legend()
@@ -428,7 +429,7 @@ def write_boxplot_figure(path: Path, latency_frames: dict[str, pd.DataFrame], dp
             series.append(values)
 
     if series:
-        ax.boxplot(series, labels=labels, patch_artist=True)
+        ax.boxplot(series, tick_labels=labels, patch_artist=True)
     ax.set_title("Latency Distribution")
     ax.set_ylabel("Latency (s)")
     fig.tight_layout()
@@ -458,8 +459,8 @@ Generated at: {report["generated_at"]}
 | --- | ---: | ---: | --- |
 | 采样点数量 | {sample["fixed"]} | {sample["havfs"]} | HAVFS 采样点减少 {sample["reduction_percent"]:.2f}% |
 | 冗余率 | {redundancy["fixed"]:.2f}% | {redundancy["havfs"]:.2f}% | 双层判定：|delta util| <= {params["redundancy_value_threshold"]} 且 delta time <= {params["redundancy_time_window"]} s |
-| 平均采样间隔 | {interval_stats["fixed"]["mean_s"]} s | {interval_stats["havfs"]["mean_s"]} s | 已包含有效采样间隔填充 |
-| 延迟 P50 | {latency["fixed"]["p50_s"]} s | {latency["havfs"]["p50_s"]} s | 事件驱动延迟 |
+| 平均采样间隔 | {interval_stats["fixed"]["mean_s"]} s | {interval_stats["havfs"]["mean_s"]} s | 已包含有效采样间隔补全 |
+| 延迟 P50 | {latency["fixed"]["p50_s"]} s | {latency["havfs"]["p50_s"]} s | 事件驱动响应延迟 |
 | 延迟 P95 | {latency["fixed"]["p95_s"]} s | {latency["havfs"]["p95_s"]} s | 无显式加速时回退到 next_refresh / interval estimate |
 | CPU 平均开销 | {overhead["fixed"]["cpu_mean_percent"]} % | {overhead["havfs"]["cpu_mean_percent"]} % | |
 | 内存平均开销 | {overhead["fixed"]["mem_mean_mb"]} MB | {overhead["havfs"]["mem_mean_mb"]} MB | |
@@ -478,11 +479,11 @@ Generated at: {report["generated_at"]}
 
 ## 3. 图表
 
-### 3.1 利用率-时间曲线
+### 3.1 利用率时间曲线
 
 ![utilization_time]({figures["utilization_time"]})
 
-### 3.2 采样间隔-时间曲线
+### 3.2 采样间隔时间曲线
 
 ![interval_time]({figures["interval_time"]})
 
@@ -501,7 +502,7 @@ Generated at: {report["generated_at"]}
 - 延迟样本 CSV：`{files["latency_csv"]}`
 - JSON 报告：`{files["json_report"]}`
 """
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8-sig")
 
 
 def main():
@@ -609,16 +610,16 @@ def main():
         figures_dir / "utilization_time.png",
         {"fixed": fixed_df, "havfs": havfs_df},
         "utilization",
-        "利用率-时间曲线",
-        "利用率 (%)",
+        "Utilization Over Time",
+        "Utilization (%)",
         args.figure_dpi,
     )
     write_line_figure(
         figures_dir / "interval_time.png",
         {"fixed": fixed_df, "havfs": havfs_df},
         "effective_interval_s",
-        "采样间隔-时间曲线",
-        "采样间隔 (s)",
+        "Effective Sampling Interval",
+        "Sampling Interval (s)",
         args.figure_dpi,
     )
     write_cdf_figure(figures_dir / "latency_cdf.png", {"fixed": fixed_latency_df, "havfs": havfs_latency_df}, args.figure_dpi)
@@ -644,14 +645,14 @@ def main():
         "latency_detection": {"fixed": fixed_latency_meta, "havfs": havfs_latency_meta},
         "charts": {
             "utilization_time": build_chart_payload(
-                {"fixed": fixed_df, "havfs": havfs_df}, "utilization", "利用率-时间曲线", "利用率 (%)"
+                {"fixed": fixed_df, "havfs": havfs_df}, "utilization", "Utilization Over Time", "Utilization (%)"
             ),
             "interval_time": build_chart_payload(
-                {"fixed": fixed_df, "havfs": havfs_df}, "effective_interval_s", "采样间隔-时间曲线", "采样间隔 (s)"
+                {"fixed": fixed_df, "havfs": havfs_df}, "effective_interval_s", "Effective Sampling Interval", "Sampling Interval (s)"
             ),
             "latency_cdf": build_latency_cdf_chart({"fixed": fixed_latency_df, "havfs": havfs_latency_df}),
             "redundancy_time": build_chart_payload(
-                {"fixed": fixed_df, "havfs": havfs_df}, "redundancy_score", "冗余率-时间曲线", "冗余率 (%)"
+                {"fixed": fixed_df, "havfs": havfs_df}, "redundancy_score", "Redundancy Score Over Time", "Redundancy (%)"
             ),
         },
         "files": {
@@ -665,7 +666,7 @@ def main():
         },
     }
 
-    json_report.write_text(json.dumps(native_value(report), ensure_ascii=False, indent=2), encoding="utf-8")
+    json_report.write_text(json.dumps(native_value(report), ensure_ascii=False, indent=2), encoding="utf-8-sig")
     write_markdown_report(markdown_report, report)
 
     fixed_p50 = report["summary"]["latency_stats_s"]["fixed"]["p50_s"]

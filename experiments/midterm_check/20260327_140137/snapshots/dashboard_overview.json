@@ -1,0 +1,35 @@
+﻿{
+    "device_total":  2,
+    "online_count":  2,
+    "high_risk_count":  0,
+    "avg_interval":  4.23,
+    "active_alerts":  0,
+    "event_total":  0,
+    "elevated_event_total":  0,
+    "outbox_pending":  0,
+    "outbox_dead":  0,
+    "latest_realtime":  [
+                            {
+                                "device_id":  "cpu0",
+                                "timestamp":  "14:03:03.563",
+                                "utilization":  17.1,
+                                "chip_temp_c":  null,
+                                "power_w":  null,
+                                "sample_interval_s":  3.9397814,
+                                "risk_score":  23.560413333333333,
+                                "state":  "ä½é¢(å¹³æ»æ¢å¤)",
+                                "status":  "ok"
+                            },
+                            {
+                                "device_id":  "gpu0",
+                                "timestamp":  "14:03:03.563",
+                                "utilization":  3.6343252621331,
+                                "chip_temp_c":  58.0,
+                                "power_w":  5.734,
+                                "sample_interval_s":  4.525343503736239,
+                                "risk_score":  10.547922139194693,
+                                "state":  "ä½é¢(å¹³æ»æ¢å¤)",
+                                "status":  "ok"
+                            }
+                        ]
+}

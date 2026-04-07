@@ -70,6 +70,8 @@ class DashboardOverview(BaseModel):
     high_risk_count: int
     avg_interval: float
     active_alerts: int
+    event_total: int
+    elevated_event_total: int
     outbox_pending: int
     outbox_dead: int
     latest_realtime: List[RealtimeMetric]
@@ -79,3 +81,14 @@ class LogRecord(BaseModel):
     line: str
     device_id: str
     timestamp: Optional[str] = None
+
+
+class EventRecord(BaseModel):
+    timestamp: Optional[str] = None
+    time: Optional[float] = None
+    device_id: str
+    event_type: str
+    severity: str
+    message: str
+    detail: Optional[str] = None
+    source: Optional[str] = None

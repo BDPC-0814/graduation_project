@@ -1,0 +1,76 @@
+digraph SystemUseCase {
+    graph [
+        rankdir=LR,
+        splines=polyline,
+        nodesep=0.55,
+        ranksep=1.0,
+        pad=0.3,
+        bgcolor="white",
+        fontname="Microsoft YaHei"
+    ];
+
+    node [
+        fontname="Microsoft YaHei",
+        fontsize=12
+    ];
+
+    edge [
+        fontname="Microsoft YaHei",
+        fontsize=11,
+        color="#4B5563",
+        penwidth=1.2
+    ];
+
+    operator [label="运维/监测人员", shape=plaintext, fontcolor="#111827"];
+    researcher [label="实验/研究人员", shape=plaintext, fontcolor="#111827"];
+    edge_agent [label="边缘采集代理", shape=plaintext, fontcolor="#111827"];
+    backend [label="平台服务端", shape=plaintext, fontcolor="#111827"];
+
+    subgraph cluster_system {
+        label="基于自适应变频的异构算力数据采集系统";
+        labelloc="t";
+        labeljust="c";
+        fontsize=15;
+        fontname="Microsoft YaHei";
+        color="#9CA3AF";
+        penwidth=1.2;
+        style="rounded";
+
+        uc1 [label="异构设备统一采集", shape=ellipse, width=2.6, height=0.8];
+        uc2 [label="自适应变频控制", shape=ellipse, width=2.6, height=0.8];
+        uc3 [label="本地缓存与失败重试", shape=ellipse, width=2.9, height=0.8];
+        uc4 [label="数据接收与入库", shape=ellipse, width=2.6, height=0.8];
+        uc5 [label="查看实时监控", shape=ellipse, width=2.4, height=0.8];
+        uc6 [label="查询历史趋势", shape=ellipse, width=2.4, height=0.8];
+        uc7 [label="查看事件与告警", shape=ellipse, width=2.5, height=0.8];
+        uc8 [label="运行对比实验", shape=ellipse, width=2.4, height=0.8];
+        uc9 [label="配置采样参数", shape=ellipse, width=2.4, height=0.8];
+        uc10 [label="查看评估结果", shape=ellipse, width=2.4, height=0.8];
+    }
+
+    { rank=same; operator; researcher; }
+    { rank=same; edge_agent; backend; }
+
+    operator -> uc5;
+    operator -> uc6;
+    operator -> uc7;
+
+    researcher -> uc8;
+    researcher -> uc9;
+    researcher -> uc10;
+
+    edge_agent -> uc1;
+    edge_agent -> uc2;
+    edge_agent -> uc3;
+    edge_agent -> uc4;
+
+    backend -> uc4;
+    backend -> uc5;
+    backend -> uc6;
+    backend -> uc7;
+    backend -> uc10;
+
+    uc2 -> uc1 [style=dashed, arrowhead=none, label="<<include>>"];
+    uc3 -> uc4 [style=dashed, arrowhead=none, label="<<include>>"];
+    uc8 -> uc10 [style=dashed, arrowhead=none, label="<<include>>"];
+}

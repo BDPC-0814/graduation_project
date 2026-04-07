@@ -37,8 +37,12 @@ def get_recent_logs(limit: int = 80) -> List[Dict[str, Any]]:
     return get_database().get_recent_logs(limit=limit)
 
 
-def get_events(device_id: Optional[str] = None, severity: Optional[str] = None) -> List[Dict[str, Any]]:
-    return get_database().get_events(device_id=device_id, severity=severity)
+def get_events(
+    device_id: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    return get_database().get_events(device_id=device_id, severity=severity, limit=limit)
 
 
 def get_alerts(status: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -79,4 +83,4 @@ def get_experiment_evaluation_report(report_path: Optional[str] = None) -> Optio
         target = ROOT_DIR / target
     if not target.exists():
         return None
-    return json.loads(target.read_text(encoding="utf-8"))
+    return json.loads(target.read_text(encoding="utf-8-sig"))

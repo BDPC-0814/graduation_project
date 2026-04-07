@@ -94,7 +94,7 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--vendor", choices=["auto", "nvidia", "intel"], default="auto")
     parser.add_argument("--reporter", choices=["console", "prometheus"], default="console")
-    parser.add_argument("--fixed-interval", type=float, default=2.0)
+    parser.add_argument("--fixed-interval", type=float, default=5.0)
     parser.add_argument("--t-min", type=float, default=0.5)
     parser.add_argument("--t-max", type=float, default=5.0)
     parser.add_argument("--duration", type=int, default=60)
