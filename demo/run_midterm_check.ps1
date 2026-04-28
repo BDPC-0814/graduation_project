@@ -6,7 +6,9 @@ param(
     [int]$Duration = 30,
     [double]$FixedInterval = 5.0,
     [double]$TMin = 0.5,
-    [double]$TMax = 5.0,
+    [double]$TMax = 8.0,
+    [string]$ReplayTrace = "",
+    [string]$GroundTruthEvents = "",
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 5173,
     [string]$ServerHost = "127.0.0.1",
@@ -224,6 +226,34 @@ New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 New-Item -ItemType Directory -Path $snapshotDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $repoRoot "experiments\evaluation\latest") -Force | Out-Null
 
+if ($ReplayTrace) {
+    $resolvedReplayTrace = if ([System.IO.Path]::IsPathRooted($ReplayTrace)) { $ReplayTrace } else { Join-Path $repoRoot $ReplayTrace }
+    if (-not (Test-Path -LiteralPath $resolvedReplayTrace)) {
+        throw "Replay trace not found: $resolvedReplayTrace. Generate one first with demo/generate_replay_trace.py."
+    }
+    $ReplayTrace = $resolvedReplayTrace
+
+    if (-not $GroundTruthEvents) {
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($ReplayTrace)
+        $candidateNames = @(
+            ($baseName -replace "trace$", "events") + ".csv",
+            ($baseName -replace "_trace$", "_events") + ".csv",
+            ($baseName + "_events.csv")
+        ) | Select-Object -Unique
+
+        foreach ($candidateName in $candidateNames) {
+            $candidatePath = Join-Path (Split-Path -Parent $ReplayTrace) $candidateName
+            if (Test-Path -LiteralPath $candidatePath) {
+                $GroundTruthEvents = $candidatePath
+                break
+            }
+        }
+    }
+    elseif (-not [System.IO.Path]::IsPathRooted($GroundTruthEvents)) {
+        $GroundTruthEvents = Join-Path $repoRoot $GroundTruthEvents
+    }
+}
+
 $backendProcess = $null
 $frontendProcess = $null
 
@@ -247,12 +277,17 @@ try {
     Wait-HttpOk -Uri "http://$ServerHost`:$ResolvedFrontendPort"
 
     $sharedArgs = @(
-        "demo/havfs_experiment.py",
+        "demo/evolution_sampling_experiment.py",
         "--device", $Devices,
         "--vendor", $GpuVendor,
-        "--duration", "$Duration",
         "--remote-endpoint", "http://$ServerHost`:$ResolvedBackendPort/api/ingest"
     )
+    if ($Duration -gt 0) {
+        $sharedArgs += @("--duration", "$Duration")
+    }
+    if ($ReplayTrace) {
+        $sharedArgs += @("--trace-file", $ReplayTrace)
+    }
 
     Invoke-Checked -FilePath $pythonPath -Arguments @(
         $sharedArgs +
@@ -268,21 +303,26 @@ try {
     Invoke-Checked -FilePath $pythonPath -Arguments @(
         $sharedArgs +
         @(
-            "--mode", "havfs",
+            "--mode", "evolution",
             "--t-min", "$TMin",
             "--t-max", "$TMax",
-            "--output", (Join-Path $dataDir "havfs_metrics.csv"),
-            "--event-output", (Join-Path $dataDir "havfs_events.csv"),
-            "--outbox-db", (Join-Path $dataDir "havfs_outbox.db")
+            "--output", (Join-Path $dataDir "evolution_metrics.csv"),
+            "--event-output", (Join-Path $dataDir "evolution_events.csv"),
+            "--outbox-db", (Join-Path $dataDir "evolution_outbox.db")
         )
     )
 
-    Invoke-Checked -FilePath $pythonPath -Arguments @(
+    $evaluateArgs = @(
         "demo/evaluate_metrics.py",
         "--fixed", (Join-Path $dataDir "fixed_metrics.csv"),
-        "--havfs", (Join-Path $dataDir "havfs_metrics.csv"),
+        "--evolution", (Join-Path $dataDir "evolution_metrics.csv"),
         "--output-dir", "experiments/evaluation/latest"
     )
+    if ($GroundTruthEvents) {
+        $evaluateArgs += @("--ground-truth-events", $GroundTruthEvents)
+    }
+
+    Invoke-Checked -FilePath $pythonPath -Arguments $evaluateArgs
 
     $overview = Invoke-RestMethod -Uri "http://$ServerHost`:$ResolvedBackendPort/api/dashboard/overview" -TimeoutSec 20
     $evaluation = Invoke-RestMethod -Uri "http://$ServerHost`:$ResolvedBackendPort/api/experiments/evaluation" -TimeoutSec 20

@@ -44,6 +44,7 @@ class XPUDynamicMetrics:
     # XPU common fields
     collect_ts: Optional[int] = None
     sample_interval_s: Optional[float] = None
+    trace_time_s: Optional[float] = None
     chip_temp_c: Optional[float] = None
     board_temp_c: Optional[float] = None
     power_w: Optional[float] = None
@@ -87,6 +88,12 @@ class XPUDynamicMetrics:
     error: Optional[str] = None
 
     def __post_init__(self):
+        self.chip_temp_c = self._normalize_positive_metric(self.chip_temp_c)
+        self.board_temp_c = self._normalize_positive_metric(self.board_temp_c)
+        self.power_w = self._normalize_positive_metric(self.power_w)
+        self.temperature = self._normalize_positive_metric(self.temperature)
+        self.power = self._normalize_positive_metric(self.power)
+
         if self.chip_temp_c is None and self.temperature is not None:
             self.chip_temp_c = self.temperature
         if self.temperature is None and self.chip_temp_c is not None:
@@ -107,6 +114,18 @@ class XPUDynamicMetrics:
 
         if self.last_error_code is None:
             self.last_error_code = self.error
+
+    @staticmethod
+    def _normalize_positive_metric(value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if numeric <= 0.0:
+            return None
+        return numeric
 
     def summary(self) -> str:
         return (

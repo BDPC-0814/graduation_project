@@ -35,12 +35,24 @@ frontend/*.tsbuildinfo
 *.log
 *.out
 *.err
+tmp_start_system.*.log
 
 # Experiment artifacts
 experiments/**/*.csv
 experiments/**/*.png
+experiments/**/*.md
+experiments/**/*.json
 experiments/**/*.jsonl
 experiments/**/*.txt
+experiments/gui_runs/
+experiments/live_runs/
+experiments/midterm_check/
+experiments/npu_capture/
+experiments/evaluation/latest/figures/
+
+# Root-level experiment leftovers
+experiments/*.csv
+experiments/*.log
 
 # Keep source-controlled data files
 !demo/data/*.csv

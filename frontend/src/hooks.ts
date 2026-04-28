@@ -4,6 +4,11 @@ export function usePollingData<T>(loader: () => Promise<T>, intervalMs = 5000) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshIndex, setRefreshIndex] = useState(0);
+
+  function reload() {
+    setRefreshIndex((current) => current + 1);
+  }
 
   useEffect(() => {
     let active = true;
@@ -34,7 +39,7 @@ export function usePollingData<T>(loader: () => Promise<T>, intervalMs = 5000) {
       active = false;
       window.clearInterval(timer);
     };
-  }, [loader, intervalMs]);
+  }, [loader, intervalMs, refreshIndex]);
 
-  return { data, loading, error };
+  return { data, loading, error, reload };
 }

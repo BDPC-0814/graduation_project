@@ -49,12 +49,44 @@ def get_alerts(status: Optional[str] = None) -> List[Dict[str, Any]]:
     return get_database().list_alerts(status=status)
 
 
+def query_alerts(
+    status: Optional[str] = None,
+    device_id: Optional[str] = None,
+    severity: Optional[str] = None,
+    rule_key: Optional[str] = None,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    return get_database().list_alerts(
+        status=status,
+        device_id=device_id,
+        severity=severity,
+        rule_key=rule_key,
+        limit=limit,
+    )
+
+
+def get_alert_summary() -> Dict[str, Any]:
+    return get_database().get_alert_summary()
+
+
 def acknowledge_alert(alert_id: int, operator: str) -> Optional[Dict[str, Any]]:
     return get_database().acknowledge_alert(alert_id=alert_id, operator=operator)
 
 
+def batch_acknowledge_alerts(alert_ids: List[int], operator: str) -> Dict[str, Any]:
+    return get_database().batch_acknowledge_alerts(alert_ids=alert_ids, operator=operator)
+
+
 def silence_alert(alert_id: int, minutes: int, operator: str) -> Optional[Dict[str, Any]]:
     return get_database().silence_alert(alert_id=alert_id, minutes=minutes, operator=operator)
+
+
+def batch_silence_alerts(alert_ids: List[int], minutes: int, operator: str) -> Dict[str, Any]:
+    return get_database().batch_silence_alerts(alert_ids=alert_ids, minutes=minutes, operator=operator)
+
+
+def unsilence_alert(alert_id: int, operator: str) -> Optional[Dict[str, Any]]:
+    return get_database().unsilence_alert(alert_id=alert_id, operator=operator)
 
 
 def get_dashboard_overview() -> Dict[str, Any]:
@@ -73,8 +105,24 @@ def get_rules() -> List[Dict[str, Any]]:
     return get_database().list_rules()
 
 
+def create_rule(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return get_database().create_rule(payload=payload)
+
+
 def update_rule(rule_key: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return get_database().update_rule(rule_key=rule_key, updates=updates)
+
+
+def delete_rule(rule_key: str, operator: str) -> Optional[Dict[str, Any]]:
+    return get_database().delete_rule(rule_key=rule_key, operator=operator)
+
+
+def export_rules() -> Dict[str, Any]:
+    return get_database().export_rules()
+
+
+def import_rules(rules: List[Dict[str, Any]], mode: str, operator: str) -> Dict[str, Any]:
+    return get_database().import_rules(rules=rules, mode=mode, operator=operator)
 
 
 def get_experiment_evaluation_report(report_path: Optional[str] = None) -> Optional[Dict[str, Any]]:

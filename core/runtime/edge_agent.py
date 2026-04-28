@@ -7,6 +7,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from core.buffer.ring_buffer import RingBuffer
 from core.sampler.device_sampler import DeviceSample, DeviceSampler
+from core.scheduler.fault_evolution_scheduler import RuntimeFeedback
 from core.storage.sqlite_outbox import SQLiteOutbox
 from core.uploader.http_uploader import HTTPUploader
 
@@ -50,19 +51,46 @@ class EdgeAgent:
         on_cycle_end: Optional[Callable[[Dict[str, DeviceSample], float], None]] = None,
     ):
         self._start_workers()
-        start_time = time.time()
+        start_monotonic = time.monotonic()
+        next_due = {
+            device_id: start_monotonic
+            for device_id in self.samplers
+        }
+        has_sampled = {
+            device_id: False
+            for device_id in self.samplers
+        }
         try:
             with ThreadPoolExecutor(max_workers=max(1, len(self.samplers))) as executor:
-                while time.time() - start_time < duration:
+                while time.monotonic() - start_monotonic < duration:
+                    now = time.monotonic()
+                    due_device_ids = [
+                        device_id
+                        for device_id, due_at in next_due.items()
+                        if due_at <= now + 1e-6
+                    ]
+                    if not due_device_ids:
+                        nearest_due = min(next_due.values()) if next_due else now
+                        sleep_time = max(nearest_due - now, 0.0)
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
+                        continue
+
+                    runtime_feedback = self._build_runtime_feedback()
+                    for device_id in due_device_ids:
+                        self.samplers[device_id].set_runtime_feedback(runtime_feedback)
+
+                    dispatch_started_at = time.monotonic()
                     futures = {
-                        device_id: executor.submit(sampler.sample)
-                        for device_id, sampler in self.samplers.items()
+                        device_id: executor.submit(self.samplers[device_id].sample)
+                        for device_id in due_device_ids
                     }
                     results = {
                         device_id: future.result()
                         for device_id, future in futures.items()
                     }
-                    elapsed = round(time.time() - start_time, 2)
+                    cycle_finished_at = time.monotonic()
+                    elapsed = round(cycle_finished_at - start_monotonic, 2)
                     wallclock = datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
                     for result in results.values():
@@ -72,11 +100,21 @@ class EdgeAgent:
                             event_records = on_event(result, elapsed, wallclock)
                             self._enqueue_records(event_records)
 
-                    global_interval = min(result.interval for result in results.values()) if results else 1.0
-                    if on_cycle_end is not None:
-                        on_cycle_end(results, global_interval)
+                    for device_id, result in results.items():
+                        if not has_sampled.get(device_id, False):
+                            next_due[device_id] = cycle_finished_at + max(result.interval, 0.0)
+                            has_sampled[device_id] = True
+                            continue
+                        scheduled_base = max(next_due.get(device_id, dispatch_started_at), dispatch_started_at)
+                        next_due[device_id] = max(cycle_finished_at, scheduled_base + max(result.interval, 0.0))
 
-                    time.sleep(global_interval)
+                    wait_hint = (
+                        min(max(due_at - time.monotonic(), 0.0) for due_at in next_due.values())
+                        if next_due
+                        else 0.0
+                    )
+                    if on_cycle_end is not None:
+                        on_cycle_end(results, wait_hint)
         finally:
             self.stop()
 
@@ -134,3 +172,16 @@ class EdgeAgent:
                     max_attempts=self.retry_max_attempts,
                 )
                 time.sleep(self.upload_poll_interval)
+
+    def _build_runtime_feedback(self) -> RuntimeFeedback:
+        pending = 0
+        dead = 0
+        if self.outbox is not None:
+            pending, dead = self.outbox.stats()
+        return RuntimeFeedback(
+            pending=pending,
+            dead=dead,
+            ring_backlog=self.ring_buffer.size(),
+            ring_capacity=getattr(self.ring_buffer, "capacity", 1),
+            uploader_active=self.uploader is not None,
+        )

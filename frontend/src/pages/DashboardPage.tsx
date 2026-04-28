@@ -33,10 +33,10 @@ const sectionItems: Array<{
   {
     key: "realtime",
     navTitle: "实时趋势",
-    navHint: "利用率、风险与采样变化",
+    navHint: "利用率、演化分数与采样变化",
     eyebrow: "Realtime",
     title: "实时趋势分析",
-    description: "按设备对比核心曲线，快速识别利用率波动、风险抬升和采样策略变化。",
+    description: "按设备对比核心曲线，快速识别利用率波动、演化分数抬升和采样策略变化。",
   },
   {
     key: "activity",
@@ -49,10 +49,10 @@ const sectionItems: Array<{
   {
     key: "experiment",
     navTitle: "实验评估",
-    navHint: "HAVFS 与固定频率对比",
+    navHint: "故障演化采样与固定频率对比",
     eyebrow: "Experiment",
     title: "离线实验评估",
-    description: "集中展示 HAVFS 与固定频率模式的评估结果，方便看节流效果与响应代价。",
+    description: "集中展示故障演化采样与固定频率模式的评估结果，方便看分层采样、响应速度和执行链路代价。",
   },
 ];
 
@@ -114,6 +114,9 @@ function normalizeSeriesName(name: string) {
   if (name === "Fixed Frequency") {
     return "固定频率";
   }
+  if (name === "Evolution Sampling") {
+    return "故障演化采样";
+  }
   return name;
 }
 
@@ -145,7 +148,7 @@ function localizeExperimentChart(
 
 function buildCategorySeries(
   seriesMap: Record<string, HistoryPoint[]>,
-  field: "utilization" | "risk_score" | "sample_interval_s"
+  field: "utilization" | "evolution_score" | "sample_interval_s"
 ) {
   const labels: string[] = [];
   Object.values(seriesMap).forEach((points) => {
@@ -231,7 +234,7 @@ function DeviceCard({ item }: { item: RealtimeMetric }) {
       <div className="device-card-top">
         <div>
           <div className="device-name">{item.device_id}</div>
-          <div className="device-subtitle">{item.state ?? "等待状态更新"}</div>
+          <div className="device-subtitle">{item.phase ?? "等待状态更新"}</div>
         </div>
         <div className={`device-status ${item.status}`}>{formatStatus(item.status)}</div>
       </div>
@@ -239,8 +242,9 @@ function DeviceCard({ item }: { item: RealtimeMetric }) {
         <div>利用率：{formatValue(item.utilization, "%")}</div>
         <div>温度：{formatValue(item.chip_temp_c, "C")}</div>
         <div>功耗：{formatValue(item.power_w, "W")}</div>
-        <div>风险分数：{formatValue(item.risk_score)}</div>
+        <div>演化分数：{formatValue(item.evolution_score)}</div>
         <div>采样间隔：{formatValue(item.sample_interval_s, "s")}</div>
+        <div>字段策略：{item.field_policy ?? "--"}</div>
       </div>
     </section>
   );
@@ -249,14 +253,14 @@ function DeviceCard({ item }: { item: RealtimeMetric }) {
 function ExperimentStatCard({
   title,
   fixed,
-  havfs,
+  evolution,
   description,
   unit = "",
   digits = 2,
 }: {
   title: string;
   fixed?: number | null;
-  havfs?: number | null;
+  evolution?: number | null;
   description?: string;
   unit?: string;
   digits?: number;
@@ -266,7 +270,7 @@ function ExperimentStatCard({
       <div className="section-title">{title}</div>
       <div className="experiment-stat-lines">
         <div>固定频率：{formatValue(fixed, unit, digits)}</div>
-        <div>HAVFS：{formatValue(havfs, unit, digits)}</div>
+        <div>故障演化采样：{formatValue(evolution, unit, digits)}</div>
         <div>{description ?? "--"}</div>
       </div>
     </section>
@@ -337,8 +341,8 @@ export function DashboardPage() {
     () => buildCategorySeries(compareData?.series ?? {}, "utilization"),
     [compareData]
   );
-  const riskChart = useMemo(
-    () => buildCategorySeries(compareData?.series ?? {}, "risk_score"),
+  const evolutionChart = useMemo(
+    () => buildCategorySeries(compareData?.series ?? {}, "evolution_score"),
     [compareData]
   );
   const intervalChart = useMemo(
@@ -458,7 +462,7 @@ export function DashboardPage() {
 
           <section className="chart-stack">
             <LineChart title="设备利用率变化" labels={utilizationChart.labels} series={utilizationChart.series} yAxisName="%" />
-            <LineChart title="设备风险分数变化" labels={riskChart.labels} series={riskChart.series} yAxisName="风险分数" />
+            <LineChart title="设备演化分数变化" labels={evolutionChart.labels} series={evolutionChart.series} yAxisName="演化分数" />
             <LineChart
               title="设备采样间隔变化"
               labels={intervalChart.labels}
@@ -508,30 +512,44 @@ export function DashboardPage() {
                 <ExperimentStatCard
                   title="采样点数量"
                   fixed={experimentSummary.sample_count.fixed}
-                  havfs={experimentSummary.sample_count.havfs}
+                  evolution={experimentSummary.sample_count.evolution}
                   description={`采样点减少：${formatValue(experimentSummary.sample_count.reduction_percent, "%")}`}
                   digits={0}
                 />
                 <ExperimentStatCard
                   title="冗余率"
                   fixed={experimentSummary.redundancy_rate_percent.fixed}
-                  havfs={experimentSummary.redundancy_rate_percent.havfs}
+                  evolution={experimentSummary.redundancy_rate_percent.evolution}
                   description="双层判定：数值阈值 + 时间窗口"
                   unit="%"
                 />
                 <ExperimentStatCard
                   title="平均采样间隔"
                   fixed={experimentSummary.interval_stats_s.fixed.mean_s}
-                  havfs={experimentSummary.interval_stats_s.havfs.mean_s}
+                  evolution={experimentSummary.interval_stats_s.evolution.mean_s}
                   description="按有效采样间隔统计"
                   unit="s"
                 />
                 <ExperimentStatCard
                   title="P95 延迟"
                   fixed={experimentSummary.latency_stats_s.fixed.p95_s}
-                  havfs={experimentSummary.latency_stats_s.havfs.p95_s}
+                  evolution={experimentSummary.latency_stats_s.evolution.p95_s}
                   description="事件触发后的响应延迟"
                   unit="s"
+                />
+                <ExperimentStatCard
+                  title="慢线激活率"
+                  fixed={experimentSummary.behavior_stats.fixed.slow_lane_ratio_percent}
+                  evolution={experimentSummary.behavior_stats.evolution.slow_lane_ratio_percent}
+                  description="字段分层补采的活跃程度"
+                  unit="%"
+                />
+                <ExperimentStatCard
+                  title="缓冲上传占比"
+                  fixed={experimentSummary.behavior_stats.fixed.buffered_transport_ratio_percent}
+                  evolution={experimentSummary.behavior_stats.evolution.buffered_transport_ratio_percent}
+                  description="边端可靠执行链路参与程度"
+                  unit="%"
                 />
               </div>
             </>
@@ -539,7 +557,7 @@ export function DashboardPage() {
             <div className="experiment-empty">
               {experimentError
                 ? `实验评估结果不可用：${experimentError}`
-                : "请先运行 demo/evaluate_metrics.py 生成 experiments/evaluation/latest/report.json。"}
+                : "请先运行 demo/evaluate_metrics.py 并传入 --evolution，生成 experiments/evaluation/latest/report.json。"}
             </div>
           )}
         </section>

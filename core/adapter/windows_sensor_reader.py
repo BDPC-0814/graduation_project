@@ -25,14 +25,18 @@ class WindowsSensorReader:
     already expose sensor data via a compatible namespace.
     """
 
-    _cache_ttl_s = 1.0
+    _success_ttl_s = 15.0
+    _failure_backoff_s = 30.0
+    _probe_timeout_s = 1.2
+    _wmi_timeout_s = 1.0
 
     def __init__(self) -> None:
         self._probe_script = (
             Path(__file__).resolve().parents[2] / "tools" / "hardware_probe" / "HardwareProbe.ps1"
         )
         self._last_snapshot = SensorSnapshot()
-        self._last_read_at = 0.0
+        self._last_attempt_at = 0.0
+        self._last_success_at = 0.0
 
     def is_supported(self) -> bool:
         return platform.system() == "Windows"
@@ -42,16 +46,21 @@ class WindowsSensorReader:
             return SensorSnapshot()
 
         now = time.monotonic()
-        if now - self._last_read_at < self._cache_ttl_s:
+        if self._has_values(self._last_snapshot) and now - self._last_success_at < self._success_ttl_s:
+            return self._last_snapshot
+        if not self._has_values(self._last_snapshot) and now - self._last_attempt_at < self._failure_backoff_s:
             return self._last_snapshot
 
+        self._last_attempt_at = now
         snapshot = self._read_from_probe()
         if not any(vars(snapshot).values()):
             snapshot = self._read_from_wmi()
 
-        self._last_snapshot = snapshot
-        self._last_read_at = now
-        return snapshot
+        if self._has_values(snapshot):
+            self._last_snapshot = snapshot
+            self._last_success_at = now
+            return snapshot
+        return self._last_snapshot
 
     def _read_from_probe(self) -> SensorSnapshot:
         if not self._probe_script.exists():
@@ -69,7 +78,7 @@ class WindowsSensorReader:
                 ],
                 stderr=subprocess.DEVNULL,
                 text=True,
-                timeout=8,
+                timeout=self._probe_timeout_s,
             )
         except Exception:
             return SensorSnapshot()
@@ -149,7 +158,7 @@ class WindowsSensorReader:
                     ["powershell", "-NoProfile", "-Command", command],
                     stderr=subprocess.DEVNULL,
                     text=True,
-                    timeout=5,
+                    timeout=self._wmi_timeout_s,
                 )
             except Exception:
                 continue
@@ -211,3 +220,6 @@ class WindowsSensorReader:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    def _has_values(self, snapshot: SensorSnapshot) -> bool:
+        return any(value is not None for value in vars(snapshot).values())

@@ -23,9 +23,9 @@ export function MetricTable({ rows }: Props) {
               <th>利用率</th>
               <th>温度</th>
               <th>功耗</th>
-              <th>风险分数</th>
+              <th>演化分数</th>
               <th>采样间隔</th>
-              <th>状态</th>
+              <th>采样相位</th>
             </tr>
           </thead>
           <tbody>
@@ -35,9 +35,9 @@ export function MetricTable({ rows }: Props) {
                 <td>{formatNumber(row.utilization, "%")}</td>
                 <td>{formatNumber(row.chip_temp_c, "C")}</td>
                 <td>{formatNumber(row.power_w, "W")}</td>
-                <td>{formatNumber(row.risk_score)}</td>
+                <td>{formatNumber(row.evolution_score)}</td>
                 <td>{formatNumber(row.sample_interval_s, "s")}</td>
-                <td>{row.state ?? row.status}</td>
+                <td>{row.phase ?? row.status}</td>
               </tr>
             ))}
           </tbody>

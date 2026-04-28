@@ -1,18 +1,41 @@
 import type {
+  AlertActionPayload,
+  AlertBatchActionPayload,
+  AlertBatchActionResult,
+  AlertBatchSilencePayload,
+  AlertRecord,
+  AlertRuleExportResponse,
+  AlertRuleCreatePayload,
+  AlertRuleImportPayload,
+  AlertRuleImportResult,
+  AlertRuleRecord,
+  AlertRuleUpdatePayload,
+  AlertSilencePayload,
+  AlertSummary,
+  AlertTrendResponse,
   CompareHistoryResponse,
+  ControlJob,
+  ControlStatusResponse,
   DashboardOverview,
   DeviceSummary,
   EventRecord,
   ExperimentEvaluationReport,
   HistoryResponse,
+  LiveCollectionPayload,
   LogRecord,
   RealtimeMetric,
+  ReplayComparePayload,
+  ReplayTracePayload,
 } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8001";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+
+function resolveApiUrl(path: string) {
+  return API_BASE ? `${API_BASE}${path}` : path;
+}
 
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(resolveApiUrl(path), {
     headers: {
       "Content-Type": "application/json",
       ...(options?.headers ?? {}),
@@ -20,7 +43,20 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    let message = `Request failed: ${response.status}`;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const body = await response.json().catch(() => null);
+      if (body && typeof body === "object") {
+        message = String((body as { detail?: string }).detail ?? message);
+      }
+    } else {
+      const text = await response.text().catch(() => "");
+      if (text) {
+        message = text;
+      }
+    }
+    throw new Error(message);
   }
   return response.json() as Promise<T>;
 }
@@ -46,5 +82,92 @@ export const api = {
     }
     return fetchJson<EventRecord[]>(`/api/events?${params.toString()}`);
   },
+  getAlertSummary: () => fetchJson<AlertSummary>("/api/alerts/summary"),
+  getAlerts: (params?: { status?: string; deviceId?: string; severity?: string; ruleKey?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    query.set("limit", String(params?.limit ?? 200));
+    if (params?.status) {
+      query.set("status", params.status);
+    }
+    if (params?.deviceId) {
+      query.set("device_id", params.deviceId);
+    }
+    if (params?.severity) {
+      query.set("severity", params.severity);
+    }
+    if (params?.ruleKey) {
+      query.set("rule_key", params.ruleKey);
+    }
+    return fetchJson<AlertRecord[]>(`/api/alerts?${query.toString()}`);
+  },
+  getAlertTrends: (hours = 24) => fetchJson<AlertTrendResponse>(`/api/alerts/trends?hours=${hours}`),
+  acknowledgeAlert: (alertId: number, payload: AlertActionPayload) =>
+    fetchJson<AlertRecord>(`/api/alerts/${alertId}/acknowledge`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  batchAcknowledgeAlerts: (payload: AlertBatchActionPayload) =>
+    fetchJson<AlertBatchActionResult>("/api/alerts/batch/acknowledge", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  silenceAlert: (alertId: number, payload: AlertSilencePayload) =>
+    fetchJson<AlertRecord>(`/api/alerts/${alertId}/silence`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  batchSilenceAlerts: (payload: AlertBatchSilencePayload) =>
+    fetchJson<AlertBatchActionResult>("/api/alerts/batch/silence", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  unsilenceAlert: (alertId: number, payload: AlertActionPayload) =>
+    fetchJson<AlertRecord>(`/api/alerts/${alertId}/unsilence`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getAlertRules: () => fetchJson<AlertRuleRecord[]>("/api/alert-rules"),
+  exportAlertRules: () => fetchJson<AlertRuleExportResponse>("/api/alert-rules/export"),
+  createAlertRule: (payload: AlertRuleCreatePayload) =>
+    fetchJson<AlertRuleRecord>("/api/alert-rules", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateAlertRule: (ruleKey: string, payload: AlertRuleUpdatePayload) =>
+    fetchJson<AlertRuleRecord>(`/api/alert-rules/${encodeURIComponent(ruleKey)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteAlertRule: (ruleKey: string, payload: AlertActionPayload) =>
+    fetchJson<AlertRuleRecord>(`/api/alert-rules/${encodeURIComponent(ruleKey)}`, {
+      method: "DELETE",
+      body: JSON.stringify(payload),
+    }),
+  importAlertRules: (payload: AlertRuleImportPayload) =>
+    fetchJson<AlertRuleImportResult>("/api/alert-rules/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   getExperimentEvaluation: () => fetchJson<ExperimentEvaluationReport>("/api/experiments/evaluation"),
+  getControlStatus: () => fetchJson<ControlStatusResponse>("/api/control/status"),
+  generateReplayTrace: (payload: ReplayTracePayload) =>
+    fetchJson<ControlJob>("/api/control/trace", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  startReplayCompare: (payload: ReplayComparePayload) =>
+    fetchJson<ControlJob>("/api/control/replay-compare", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  startLiveCollection: (payload: LiveCollectionPayload) =>
+    fetchJson<ControlJob>("/api/control/live", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cancelActiveJob: () =>
+    fetchJson<ControlJob>("/api/control/cancel", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
 };

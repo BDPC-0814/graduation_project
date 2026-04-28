@@ -16,16 +16,17 @@ plt.rcParams["axes.unicode_minus"] = False
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate fixed-frequency sampling against HAVFS.")
+    parser = argparse.ArgumentParser(description="Evaluate fixed-frequency sampling against fault-evolution adaptive sampling.")
     parser.add_argument("--fixed", required=True, help="Path to fixed mode CSV")
-    parser.add_argument("--havfs", required=True, help="Path to HAVFS mode CSV")
+    parser.add_argument("--evolution", required=True, help="Path to fault-evolution mode CSV")
+    parser.add_argument("--ground-truth-events", default="", help="Optional CSV of shared event timestamps for reproducible latency evaluation")
     parser.add_argument("--output-dir", default="experiments/evaluation/latest", help="Directory for reports and figures")
     parser.add_argument(
         "--curve-output",
         default="",
         help="Optional compatibility output for the merged time-series CSV. Defaults to <output-dir>/timeseries_metrics.csv",
     )
-    parser.add_argument("--redundancy-value-threshold", type=float, default=1.0)
+    parser.add_argument("--redundancy-value-threshold", type=float, default=3.0)
     parser.add_argument("--redundancy-time-window", type=float, default=5.0)
     parser.add_argument("--rolling-window", type=int, default=5)
     parser.add_argument("--latency-change-threshold", type=float, default=5.0)
@@ -67,13 +68,14 @@ def native_value(value: Any):
 
 
 def normalize_mode_name(mode: str):
-    return "HAVFS" if mode.lower() == "havfs" else "Fixed Frequency"
+    return "Evolution Sampling" if mode.lower() == "evolution" else "Fixed Frequency"
 
 
 def load_dataset(path: str, mode: str):
     df = pd.read_csv(path)
     work = df.copy()
     work["mode"] = mode
+    work["device_id"] = work.get("device_id", pd.Series(["unknown"] * len(work))).fillna("unknown").astype(str)
     work["time"] = pd.to_numeric(work.get("time"), errors="coerce")
     work["utilization"] = pd.to_numeric(work.get("utilization"), errors="coerce")
     work["overhead_cpu"] = pd.to_numeric(work.get("overhead_cpu"), errors="coerce")
@@ -86,54 +88,105 @@ def load_dataset(path: str, mode: str):
         else pd.Series(dtype=float)
     )
     if len(interval) == len(work):
-        work["effective_interval_s"] = interval
+        work["planned_interval_s"] = interval
         if len(sample_interval) == len(work):
-            work["effective_interval_s"] = work["effective_interval_s"].fillna(sample_interval)
+            work["planned_interval_s"] = work["planned_interval_s"].fillna(sample_interval)
     elif len(sample_interval) == len(work):
-        work["effective_interval_s"] = sample_interval
+        work["planned_interval_s"] = sample_interval
     else:
-        work["effective_interval_s"] = np.nan
+        work["planned_interval_s"] = np.nan
 
-    work = work.sort_values("time").reset_index(drop=True)
-    work["sample_gap_s"] = work["time"].diff()
+    work = work.sort_values(["device_id", "time"]).reset_index(drop=True)
+    work["sample_gap_s"] = work.groupby("device_id")["time"].diff()
     if len(work) > 1:
         default_gap = work["sample_gap_s"].dropna().median()
     else:
-        default_gap = work["effective_interval_s"].dropna().median()
+        default_gap = work["planned_interval_s"].dropna().median()
     if pd.isna(default_gap):
         default_gap = 0.0
-    work["sample_gap_s"] = work["sample_gap_s"].fillna(work["effective_interval_s"]).fillna(default_gap)
-    work["effective_interval_s"] = work["effective_interval_s"].fillna(work["sample_gap_s"]).fillna(default_gap)
-    work["state"] = work.get("state", "").fillna("").astype(str)
+    work["sample_gap_s"] = work["sample_gap_s"].fillna(work["planned_interval_s"]).fillna(default_gap)
+    work["planned_interval_s"] = work["planned_interval_s"].fillna(work["sample_gap_s"]).fillna(default_gap)
+    work["realized_interval_s"] = work["sample_gap_s"].fillna(work["planned_interval_s"]).fillna(default_gap)
+    work["effective_interval_s"] = work["realized_interval_s"]
+    phase_source = work["phase"] if "phase" in work.columns else work.get("state", pd.Series([""] * len(work)))
+    field_policy_source = work["field_policy"] if "field_policy" in work.columns else pd.Series([""] * len(work))
+    transport_policy_source = work["transport_policy"] if "transport_policy" in work.columns else pd.Series([""] * len(work))
+    work["phase"] = phase_source.fillna("").astype(str)
+    work["field_policy"] = field_policy_source.fillna("").astype(str)
+    work["transport_policy"] = transport_policy_source.fillna("").astype(str)
+    work["evolution_score"] = pd.to_numeric(
+        work.get("evolution_score", work.get("risk_score")), errors="coerce"
+    )
+    work["field_priority_score"] = pd.to_numeric(work.get("field_priority_score"), errors="coerce")
+    work["execution_pressure_score"] = pd.to_numeric(work.get("execution_pressure_score"), errors="coerce")
+    work["control_score"] = pd.to_numeric(work.get("control_score"), errors="coerce")
+    sampled_slow = work.get("sampled_slow")
+    if sampled_slow is not None:
+        work["sampled_slow"] = sampled_slow.astype(str).str.lower().isin(["true", "1", "yes"])
+    else:
+        work["sampled_slow"] = False
     return work
 
 
+def load_ground_truth_events(path: str):
+    events = pd.read_csv(path)
+    if events.empty:
+        return events
+    events["time"] = pd.to_numeric(events.get("time"), errors="coerce")
+    events["device_id"] = events.get("device_id", pd.Series([""] * len(events))).fillna("").astype(str)
+    events["event_type"] = events.get("event_type", pd.Series(["ground_truth"] * len(events))).fillna("ground_truth").astype(str)
+    events["severity"] = events.get("severity", pd.Series([""] * len(events))).fillna("").astype(str)
+    events["description"] = events.get("description", pd.Series([""] * len(events))).fillna("").astype(str)
+    return events.sort_values("time").reset_index(drop=True)
+
+
 def compute_redundancy(df: pd.DataFrame, value_threshold: float, time_window: float, rolling_window: int):
-    flags = []
-    anchor_util = None
-    anchor_time = None
-
-    for row in df.itertuples(index=False):
-        util = row.utilization
-        current_time = row.time
-        redundant = False
-
-        if anchor_util is not None and pd.notna(util) and pd.notna(current_time):
-            value_close = abs(float(util) - float(anchor_util)) <= value_threshold
-            time_close = abs(float(current_time) - float(anchor_time)) <= time_window
-            redundant = value_close and time_close
-
-        flags.append(redundant)
-        if not redundant and pd.notna(util) and pd.notna(current_time):
-            anchor_util = float(util)
-            anchor_time = float(current_time)
-
     work = df.copy()
-    work["redundant"] = flags
-    work["redundancy_score"] = pd.Series([float(flag) for flag in flags]).rolling(
+    util_delta = work.groupby("device_id")["utilization"].diff().abs().fillna(np.inf)
+    temp_delta = (
+        pd.to_numeric(work["chip_temp_c"], errors="coerce").groupby(work["device_id"]).diff().abs().fillna(0.0)
+        if "chip_temp_c" in work.columns
+        else pd.Series(np.zeros(len(work)))
+    )
+    power_delta = (
+        pd.to_numeric(work["power_w"], errors="coerce").groupby(work["device_id"]).diff().abs().fillna(0.0)
+        if "power_w" in work.columns
+        else pd.Series(np.zeros(len(work)))
+    )
+    sample_gap = work["sample_gap_s"].fillna(work["effective_interval_s"]).fillna(0.0)
+    planned_gap = work.get("planned_interval_s", sample_gap).fillna(sample_gap).fillna(0.0)
+    reference_gap = planned_gap.groupby(work["device_id"]).shift().fillna(planned_gap).fillna(time_window)
+    information_gain = util_delta + (temp_delta * 0.35) + (power_delta * 0.15)
+    information_threshold = value_threshold * (
+        1.0 + np.minimum(sample_gap.to_numpy(), time_window) / max(time_window, 1.0) * 0.5
+    )
+
+    same_device = work["device_id"].eq(work["device_id"].shift()).fillna(False)
+    same_phase = work["phase"].eq(work["phase"].shift()).fillna(False)
+    same_field_policy = work["field_policy"].eq(work["field_policy"].shift()).fillna(False)
+    same_transport_policy = work["transport_policy"].eq(work["transport_policy"].shift()).fillna(False)
+    fast_lane_repeat = ~work["sampled_slow"].fillna(False)
+    healthy = work.get("status", pd.Series(["ok"] * len(work))).fillna("ok").eq("ok")
+    short_repeat = sample_gap <= np.maximum(reference_gap.to_numpy() * 1.15, time_window)
+
+    redundant = (
+        short_repeat
+        & same_device
+        & same_phase
+        & same_field_policy
+        & same_transport_policy
+        & fast_lane_repeat
+        & healthy
+        & (information_gain.to_numpy() <= information_threshold)
+    )
+    if len(redundant):
+        redundant.iloc[0] = False
+
+    work["redundant"] = redundant
+    work["redundancy_score"] = pd.Series(redundant.astype(float)).rolling(
         window=max(1, rolling_window), min_periods=1
     ).mean() * 100.0
-    rate = float(np.mean(flags) * 100.0) if flags else 0.0
+    rate = float(work["redundant"].mean() * 100.0) if len(work) else 0.0
     return work, rate
 
 
@@ -149,7 +202,78 @@ def classify_event_type(is_jump: bool, is_high: bool):
 
 def is_accelerated_state(state_text: str):
     lowered = (state_text or "").lower()
-    return "high" in lowered or "高频" in state_text
+    return any(keyword in lowered for keyword in ("focus", "recovery")) or any(
+        keyword in state_text for keyword in ("聚焦", "恢复")
+    )
+
+
+def compute_latency_from_ground_truth(
+    df: pd.DataFrame,
+    events: pd.DataFrame,
+    reaction_window: float,
+    interval_drop_ratio: float,
+):
+    work = df.copy().sort_values("time").reset_index(drop=True)
+    if events.empty:
+        return pd.DataFrame(), {"source": "ground_truth_events", "event_count": 0}
+
+    median_interval = work["effective_interval_s"].dropna().median()
+    if pd.isna(median_interval) or median_interval <= 0:
+        median_interval = 0.0
+
+    records = []
+    for event in events.itertuples(index=False):
+        event_time = event.time
+        if pd.isna(event_time):
+            continue
+
+        if getattr(event, "device_id", ""):
+            event_scope = work[work["device_id"].astype(str) == str(event.device_id)].sort_values("time").reset_index(drop=True)
+        else:
+            event_scope = work.sort_values("time").reset_index(drop=True)
+        if event_scope.empty:
+            continue
+
+        baseline_frame = event_scope[event_scope["time"] < float(event_time)].tail(3)
+        baseline_interval = baseline_frame["effective_interval_s"].median()
+        if pd.isna(baseline_interval) or baseline_interval <= 0:
+            baseline_interval = median_interval if median_interval > 0 else reaction_window
+
+        future = event_scope[event_scope["time"] >= float(event_time)]
+        future = future[future["time"] <= float(event_time) + reaction_window]
+        accelerated = future[
+            (future["effective_interval_s"] <= baseline_interval * (1.0 - interval_drop_ratio))
+            | future["phase"].map(is_accelerated_state)
+        ]
+        if not accelerated.empty:
+            matched = accelerated.iloc[0]
+            latency = float(matched["time"] - event_time)
+            source = "ground_truth_accelerated"
+        elif not future.empty:
+            matched = future.iloc[0]
+            latency = float(matched["time"] - event_time)
+            source = "ground_truth_first_observation"
+        else:
+            matched = None
+            latency = float(max(baseline_interval, 0.0))
+            source = "ground_truth_estimated_by_baseline"
+
+        records.append(
+            {
+                "mode": work.iloc[0]["mode"] if len(work) else "",
+                "device_id": getattr(event, "device_id", ""),
+                "event_time": float(event_time),
+                "latency_s": latency,
+                "latency_source": source,
+                "event_type": getattr(event, "event_type", "ground_truth"),
+                "event_severity": getattr(event, "severity", ""),
+                "event_description": getattr(event, "description", ""),
+                "event_utilization": round_or_none(matched["utilization"], 4) if matched is not None else None,
+                "event_interval_s": round_or_none(baseline_interval, 4),
+            }
+        )
+
+    return pd.DataFrame(records), {"source": "ground_truth_events", "event_count": int(len(records))}
 
 
 def compute_latency_distribution(
@@ -158,8 +282,17 @@ def compute_latency_distribution(
     high_quantile: float,
     reaction_window: float,
     interval_drop_ratio: float,
+    ground_truth_events=None,
 ):
-    work = df.copy()
+    if ground_truth_events is not None:
+        return compute_latency_from_ground_truth(
+            df=df,
+            events=ground_truth_events,
+            reaction_window=reaction_window,
+            interval_drop_ratio=interval_drop_ratio,
+        )
+
+    work = df.copy().sort_values("time").reset_index(drop=True)
     util = work["utilization"]
     diffs = util.diff().abs().fillna(0.0)
     high_threshold = float(util.quantile(high_quantile)) if util.notna().any() else np.nan
@@ -186,7 +319,7 @@ def compute_latency_distribution(
         future = future[future["time"] <= float(event_time) + reaction_window]
         accelerated = future[
             (future["effective_interval_s"] <= current_interval * (1.0 - interval_drop_ratio))
-            | future["state"].map(is_accelerated_state)
+            | future["phase"].map(is_accelerated_state)
         ]
         if not accelerated.empty:
             latency = float(accelerated.iloc[0]["time"] - event_time)
@@ -260,76 +393,125 @@ def compute_overhead_stats(df: pd.DataFrame):
     }
 
 
+def compute_behavior_stats(df: pd.DataFrame):
+    sampled_ratio = float(df["sampled_slow"].mean() * 100.0) if "sampled_slow" in df.columns and len(df) else 0.0
+    buffered_ratio = (
+        float(df["transport_policy"].str.contains("缓冲", na=False).mean() * 100.0)
+        if "transport_policy" in df.columns and len(df)
+        else 0.0
+    )
+    phase_focus_ratio = (
+        float(df["phase"].str.contains("聚焦", na=False).mean() * 100.0)
+        if "phase" in df.columns and len(df)
+        else 0.0
+    )
+    return {
+        "slow_lane_ratio_percent": round_or_none(sampled_ratio, 4),
+        "buffered_transport_ratio_percent": round_or_none(buffered_ratio, 4),
+        "focus_phase_ratio_percent": round_or_none(phase_focus_ratio, 4),
+        "execution_pressure_mean": round_or_none(df["execution_pressure_score"].dropna().mean(), 4)
+        if "execution_pressure_score" in df.columns and df["execution_pressure_score"].notna().any()
+        else None,
+    }
+
+
 def build_summary_rows(report_summary: dict[str, Any]):
     sample = report_summary["sample_count"]
     redundancy = report_summary["redundancy_rate_percent"]
     interval_stats = report_summary["interval_stats_s"]
     latency = report_summary["latency_stats_s"]
     overhead = report_summary["overhead_stats"]
+    behavior = report_summary["behavior_stats"]
 
     return [
         {
             "metric": "sample_count",
             "fixed": sample["fixed"],
-            "havfs": sample["havfs"],
+            "evolution": sample["evolution"],
             "delta_percent": sample["reduction_percent"],
             "unit": "points",
         },
         {
             "metric": "redundancy_rate",
             "fixed": redundancy["fixed"],
-            "havfs": redundancy["havfs"],
-            "delta_percent": round_or_none(redundancy["fixed"] - redundancy["havfs"], 4),
+            "evolution": redundancy["evolution"],
+            "delta_percent": round_or_none(redundancy["fixed"] - redundancy["evolution"], 4),
             "unit": "%",
         },
         {
             "metric": "interval_mean",
             "fixed": interval_stats["fixed"]["mean_s"],
-            "havfs": interval_stats["havfs"]["mean_s"],
+            "evolution": interval_stats["evolution"]["mean_s"],
             "delta_percent": None,
             "unit": "s",
         },
         {
             "metric": "latency_p50",
             "fixed": latency["fixed"]["p50_s"],
-            "havfs": latency["havfs"]["p50_s"],
+            "evolution": latency["evolution"]["p50_s"],
             "delta_percent": None,
             "unit": "s",
         },
         {
             "metric": "latency_p95",
             "fixed": latency["fixed"]["p95_s"],
-            "havfs": latency["havfs"]["p95_s"],
+            "evolution": latency["evolution"]["p95_s"],
             "delta_percent": None,
             "unit": "s",
         },
         {
             "metric": "cpu_overhead_mean",
             "fixed": overhead["fixed"]["cpu_mean_percent"],
-            "havfs": overhead["havfs"]["cpu_mean_percent"],
+            "evolution": overhead["evolution"]["cpu_mean_percent"],
             "delta_percent": None,
             "unit": "%",
         },
         {
             "metric": "mem_overhead_mean",
             "fixed": overhead["fixed"]["mem_mean_mb"],
-            "havfs": overhead["havfs"]["mem_mean_mb"],
+            "evolution": overhead["evolution"]["mem_mean_mb"],
             "delta_percent": None,
             "unit": "MB",
         },
+        {
+            "metric": "slow_lane_ratio",
+            "fixed": behavior["fixed"]["slow_lane_ratio_percent"],
+            "evolution": behavior["evolution"]["slow_lane_ratio_percent"],
+            "delta_percent": None,
+            "unit": "%",
+        },
+        {
+            "metric": "buffered_transport_ratio",
+            "fixed": behavior["fixed"]["buffered_transport_ratio_percent"],
+            "evolution": behavior["evolution"]["buffered_transport_ratio_percent"],
+            "delta_percent": None,
+            "unit": "%",
+        },
     ]
+
+
+def aggregate_timeseries(frame: pd.DataFrame, value_column: str):
+    usable = frame[["time", value_column]].copy()
+    usable["time"] = pd.to_numeric(usable["time"], errors="coerce")
+    usable[value_column] = pd.to_numeric(usable[value_column], errors="coerce")
+    usable = usable.dropna(subset=["time"])
+    if usable.empty:
+        return usable
+    return usable.groupby("time", as_index=False)[value_column].mean().sort_values("time").reset_index(drop=True)
 
 
 def build_chart_payload(series_frames: dict[str, pd.DataFrame], value_column: str, title: str, y_axis_name: str):
     label_map: dict[str, float] = {}
     for frame in series_frames.values():
-        for value in frame["time"].dropna().tolist():
+        aggregated = aggregate_timeseries(frame, value_column)
+        for value in aggregated["time"].dropna().tolist():
             label_map[f"{float(value):.2f}s"] = float(value)
 
     labels = [item[0] for item in sorted(label_map.items(), key=lambda entry: entry[1])]
     series = []
     for mode, frame in series_frames.items():
-        points = {f"{float(row.time):.2f}s": row._asdict()[value_column] for row in frame.itertuples(index=False)}
+        aggregated = aggregate_timeseries(frame, value_column)
+        points = {f"{float(row.time):.2f}s": row._asdict()[value_column] for row in aggregated.itertuples(index=False)}
         series.append(
             {
                 "name": normalize_mode_name(mode),
@@ -375,12 +557,13 @@ def apply_plot_style():
 def write_line_figure(path: Path, series_frames: dict[str, pd.DataFrame], value_column: str, title: str, y_label: str, dpi: int):
     apply_plot_style()
     fig, ax = plt.subplots(figsize=(11, 4.8))
-    palette = {"fixed": "#3b82f6", "havfs": "#ef4444"}
+    palette = {"fixed": "#3b82f6", "evolution": "#ef4444"}
 
     for mode, frame in series_frames.items():
+        aggregated = aggregate_timeseries(frame, value_column)
         ax.plot(
-            frame["time"].to_numpy(),
-            frame[value_column].to_numpy(),
+            aggregated["time"].to_numpy(),
+            aggregated[value_column].to_numpy(),
             label=normalize_mode_name(mode),
             linewidth=2.2,
             color=palette.get(mode, None),
@@ -398,7 +581,7 @@ def write_line_figure(path: Path, series_frames: dict[str, pd.DataFrame], value_
 def write_cdf_figure(path: Path, latency_frames: dict[str, pd.DataFrame], dpi: int):
     apply_plot_style()
     fig, ax = plt.subplots(figsize=(8.8, 4.8))
-    palette = {"fixed": "#3b82f6", "havfs": "#ef4444"}
+    palette = {"fixed": "#3b82f6", "evolution": "#ef4444"}
 
     for mode, frame in latency_frames.items():
         values = sorted(frame["latency_s"].dropna().astype(float).tolist())
@@ -429,7 +612,7 @@ def write_boxplot_figure(path: Path, latency_frames: dict[str, pd.DataFrame], dp
             series.append(values)
 
     if series:
-        ax.boxplot(series, tick_labels=labels, patch_artist=True)
+        ax.boxplot(series, labels=labels, patch_artist=True)
     ax.set_title("Latency Distribution")
     ax.set_ylabel("Latency (s)")
     fig.tight_layout()
@@ -444,38 +627,52 @@ def write_markdown_report(path: Path, report: dict[str, Any]):
     latency = summary["latency_stats_s"]
     interval_stats = summary["interval_stats_s"]
     overhead = summary["overhead_stats"]
+    behavior = summary["behavior_stats"]
     files = report["files"]
     figures = files["figures"]
     params = report["parameters"]
     latency_meta = report["latency_detection"]
+    using_ground_truth = params.get("latency_event_source") == "ground_truth_events"
+    latency_definition = (
+        "- Latency: measured from shared ground-truth event timestamps to the first accelerated response or first observation after the event."
+        if using_ground_truth
+        else f"- Latency: from a significant workload event to the first accelerated response. A significant event is detected when utilization jump >= {params['latency_change_threshold']} or utilization >= the {params['latency_high_quantile']:.0%} quantile threshold."
+    )
+    latency_meta_lines = (
+        f"- Fixed mode latency source: {latency_meta['fixed'].get('source')} (events={latency_meta['fixed'].get('event_count')})\n"
+        f"- Evolution mode latency source: {latency_meta['evolution'].get('source')} (events={latency_meta['evolution'].get('event_count')})"
+        if using_ground_truth
+        else f"- 固定频率高负载阈值：{latency_meta['fixed']['high_util_threshold']}\n- 故障演化采样高负载阈值：{latency_meta['evolution']['high_util_threshold']}"
+    )
 
-    content = f"""# HAVFS 实验评估报告
+    content = f"""# 故障演化采样实验评估报告
 
 Generated at: {report["generated_at"]}
 
 ## 1. 实验总览
 
-| 指标 | 固定频率 | HAVFS | 说明 |
+| 指标 | 固定频率 | 故障演化采样 | 说明 |
 | --- | ---: | ---: | --- |
-| 采样点数量 | {sample["fixed"]} | {sample["havfs"]} | HAVFS 采样点减少 {sample["reduction_percent"]:.2f}% |
-| 冗余率 | {redundancy["fixed"]:.2f}% | {redundancy["havfs"]:.2f}% | 双层判定：|delta util| <= {params["redundancy_value_threshold"]} 且 delta time <= {params["redundancy_time_window"]} s |
-| 平均采样间隔 | {interval_stats["fixed"]["mean_s"]} s | {interval_stats["havfs"]["mean_s"]} s | 已包含有效采样间隔补全 |
-| 延迟 P50 | {latency["fixed"]["p50_s"]} s | {latency["havfs"]["p50_s"]} s | 事件驱动响应延迟 |
-| 延迟 P95 | {latency["fixed"]["p95_s"]} s | {latency["havfs"]["p95_s"]} s | 无显式加速时回退到 next_refresh / interval estimate |
-| CPU 平均开销 | {overhead["fixed"]["cpu_mean_percent"]} % | {overhead["havfs"]["cpu_mean_percent"]} % | |
-| 内存平均开销 | {overhead["fixed"]["mem_mean_mb"]} MB | {overhead["havfs"]["mem_mean_mb"]} MB | |
+| 采样点数量 | {sample["fixed"]} | {sample["evolution"]} | 故障演化采样采样点减少 {sample["reduction_percent"]:.2f}% |
+| 冗余率 | {redundancy["fixed"]:.2f}% | {redundancy["evolution"]:.2f}% | 低信息量重复采样：变化增益低、相位未变、策略未变、且处于短间隔快线重复采样 |
+| 平均采样间隔 | {interval_stats["fixed"]["mean_s"]} s | {interval_stats["evolution"]["mean_s"]} s | 已包含有效采样间隔补全 |
+| 延迟 P50 | {latency["fixed"]["p50_s"]} s | {latency["evolution"]["p50_s"]} s | 事件驱动响应延迟 |
+| 延迟 P95 | {latency["fixed"]["p95_s"]} s | {latency["evolution"]["p95_s"]} s | 无显式加速时回退到 next_refresh / interval estimate |
+| 慢线激活率 | {behavior["fixed"]["slow_lane_ratio_percent"]} % | {behavior["evolution"]["slow_lane_ratio_percent"]} % | 字段分层补采活跃程度 |
+| 缓冲上传占比 | {behavior["fixed"]["buffered_transport_ratio_percent"]} % | {behavior["evolution"]["buffered_transport_ratio_percent"]} % | 边端可靠执行链路参与程度 |
+| CPU 平均开销 | {overhead["fixed"]["cpu_mean_percent"]} % | {overhead["evolution"]["cpu_mean_percent"]} % | |
+| 内存平均开销 | {overhead["fixed"]["mem_mean_mb"]} MB | {overhead["evolution"]["mem_mean_mb"]} MB | |
 
 ## 2. 指标定义
 
-- Latency: from a significant workload event to the first accelerated response. A significant event is detected when utilization jump >= {params["latency_change_threshold"]} or utilization >= the {params["latency_high_quantile"]:.0%} quantile threshold.
-- Acceleration response: interval shrinks by at least {params["latency_interval_drop_ratio"]:.0%}, or the sampler enters a high-priority state.
+{latency_definition}
+- Acceleration response: interval shrinks by at least {params["latency_interval_drop_ratio"]:.0%}, or the sampler enters a focus / recovery phase.
 - NaN avoidance: if no explicit acceleration is observed in the reaction window, latency falls back to `next_refresh`; if the trace ends, it falls back to `estimated_by_interval`.
-- Redundancy: a point is redundant only when both numeric similarity and time-window similarity hold at the same time.
+- Redundancy: a point is counted as redundant only when information gain stays low, the phase and field policy do not change, and the point appears as a short-gap fast-lane repeat sample.
 
 延迟阈值：
 
-- 固定频率高负载阈值：{latency_meta["fixed"]["high_util_threshold"]}
-- HAVFS 高负载阈值：{latency_meta["havfs"]["high_util_threshold"]}
+{latency_meta_lines}
 
 ## 3. 图表
 
@@ -516,7 +713,8 @@ def main():
     curve_output.parent.mkdir(parents=True, exist_ok=True)
 
     fixed_df = load_dataset(args.fixed, mode="fixed")
-    havfs_df = load_dataset(args.havfs, mode="havfs")
+    evolution_df = load_dataset(args.evolution, mode="evolution")
+    ground_truth_events = load_ground_truth_events(args.ground_truth_events) if args.ground_truth_events else None
 
     fixed_df, fixed_redundancy = compute_redundancy(
         fixed_df,
@@ -524,8 +722,8 @@ def main():
         time_window=args.redundancy_time_window,
         rolling_window=args.rolling_window,
     )
-    havfs_df, havfs_redundancy = compute_redundancy(
-        havfs_df,
+    evolution_df, evolution_redundancy = compute_redundancy(
+        evolution_df,
         value_threshold=args.redundancy_value_threshold,
         time_window=args.redundancy_time_window,
         rolling_window=args.rolling_window,
@@ -537,35 +735,41 @@ def main():
         high_quantile=args.latency_high_quantile,
         reaction_window=args.latency_reaction_window,
         interval_drop_ratio=args.latency_interval_drop_ratio,
+        ground_truth_events=ground_truth_events,
     )
-    havfs_latency_df, havfs_latency_meta = compute_latency_distribution(
-        havfs_df,
+    evolution_latency_df, evolution_latency_meta = compute_latency_distribution(
+        evolution_df,
         change_threshold=args.latency_change_threshold,
         high_quantile=args.latency_high_quantile,
         reaction_window=args.latency_reaction_window,
         interval_drop_ratio=args.latency_interval_drop_ratio,
+        ground_truth_events=ground_truth_events,
     )
 
-    merged_timeseries = pd.concat([fixed_df, havfs_df], ignore_index=True)
-    latency_samples = pd.concat([fixed_latency_df, havfs_latency_df], ignore_index=True)
+    merged_timeseries = pd.concat([fixed_df, evolution_df], ignore_index=True)
+    latency_samples = pd.concat([fixed_latency_df, evolution_latency_df], ignore_index=True)
 
     summary = {
         "sample_count": {
             "fixed": int(len(fixed_df)),
-            "havfs": int(len(havfs_df)),
-            "reduction_percent": round_or_none((len(fixed_df) - len(havfs_df)) / max(len(fixed_df), 1) * 100.0, 4),
+            "evolution": int(len(evolution_df)),
+            "reduction_percent": round_or_none((len(fixed_df) - len(evolution_df)) / max(len(fixed_df), 1) * 100.0, 4),
         },
         "redundancy_rate_percent": {
             "fixed": round_or_none(fixed_redundancy, 4),
-            "havfs": round_or_none(havfs_redundancy, 4),
+            "evolution": round_or_none(evolution_redundancy, 4),
         },
         "interval_stats_s": {
             "fixed": compute_interval_stats(fixed_df),
-            "havfs": compute_interval_stats(havfs_df),
+            "evolution": compute_interval_stats(evolution_df),
         },
         "overhead_stats": {
             "fixed": compute_overhead_stats(fixed_df),
-            "havfs": compute_overhead_stats(havfs_df),
+            "evolution": compute_overhead_stats(evolution_df),
+        },
+        "behavior_stats": {
+            "fixed": compute_behavior_stats(fixed_df),
+            "evolution": compute_behavior_stats(evolution_df),
         },
         "latency_stats_s": {
             "fixed": {
@@ -574,11 +778,11 @@ def main():
                 "p95_s": percentile_or_none(fixed_latency_df["latency_s"].tolist(), 95),
                 "mean_s": round_or_none(fixed_latency_df["latency_s"].mean(), 4) if len(fixed_latency_df) else None,
             },
-            "havfs": {
-                "count": int(len(havfs_latency_df)),
-                "p50_s": percentile_or_none(havfs_latency_df["latency_s"].tolist(), 50),
-                "p95_s": percentile_or_none(havfs_latency_df["latency_s"].tolist(), 95),
-                "mean_s": round_or_none(havfs_latency_df["latency_s"].mean(), 4) if len(havfs_latency_df) else None,
+            "evolution": {
+                "count": int(len(evolution_latency_df)),
+                "p50_s": percentile_or_none(evolution_latency_df["latency_s"].tolist(), 50),
+                "p95_s": percentile_or_none(evolution_latency_df["latency_s"].tolist(), 95),
+                "mean_s": round_or_none(evolution_latency_df["latency_s"].mean(), 4) if len(evolution_latency_df) else None,
             },
         },
     }
@@ -593,7 +797,7 @@ def main():
     pd.DataFrame(
         [
             {"mode": "fixed", **summary["interval_stats_s"]["fixed"]},
-            {"mode": "havfs", **summary["interval_stats_s"]["havfs"]},
+            {"mode": "evolution", **summary["interval_stats_s"]["evolution"]},
         ]
     ).to_csv(interval_csv, index=False, encoding="utf-8-sig")
     merged_timeseries.to_csv(curve_output, index=False, encoding="utf-8-sig")
@@ -608,7 +812,7 @@ def main():
 
     write_line_figure(
         figures_dir / "utilization_time.png",
-        {"fixed": fixed_df, "havfs": havfs_df},
+        {"fixed": fixed_df, "evolution": evolution_df},
         "utilization",
         "Utilization Over Time",
         "Utilization (%)",
@@ -616,22 +820,26 @@ def main():
     )
     write_line_figure(
         figures_dir / "interval_time.png",
-        {"fixed": fixed_df, "havfs": havfs_df},
+        {"fixed": fixed_df, "evolution": evolution_df},
         "effective_interval_s",
         "Effective Sampling Interval",
         "Sampling Interval (s)",
         args.figure_dpi,
     )
-    write_cdf_figure(figures_dir / "latency_cdf.png", {"fixed": fixed_latency_df, "havfs": havfs_latency_df}, args.figure_dpi)
+    write_cdf_figure(figures_dir / "latency_cdf.png", {"fixed": fixed_latency_df, "evolution": evolution_latency_df}, args.figure_dpi)
     write_boxplot_figure(
         figures_dir / "latency_boxplot.png",
-        {"fixed": fixed_latency_df, "havfs": havfs_latency_df},
+        {"fixed": fixed_latency_df, "evolution": evolution_latency_df},
         args.figure_dpi,
     )
 
     report = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "inputs": {"fixed": str(Path(args.fixed)), "havfs": str(Path(args.havfs))},
+        "inputs": {
+            "fixed": str(Path(args.fixed)),
+            "evolution": str(Path(args.evolution)),
+            "ground_truth_events": str(Path(args.ground_truth_events)) if args.ground_truth_events else "",
+        },
         "parameters": {
             "redundancy_value_threshold": args.redundancy_value_threshold,
             "redundancy_time_window": args.redundancy_time_window,
@@ -640,19 +848,20 @@ def main():
             "latency_high_quantile": args.latency_high_quantile,
             "latency_reaction_window": args.latency_reaction_window,
             "latency_interval_drop_ratio": args.latency_interval_drop_ratio,
+            "latency_event_source": "ground_truth_events" if ground_truth_events is not None else "sampled_proxy",
         },
         "summary": summary,
-        "latency_detection": {"fixed": fixed_latency_meta, "havfs": havfs_latency_meta},
+        "latency_detection": {"fixed": fixed_latency_meta, "evolution": evolution_latency_meta},
         "charts": {
             "utilization_time": build_chart_payload(
-                {"fixed": fixed_df, "havfs": havfs_df}, "utilization", "Utilization Over Time", "Utilization (%)"
+                {"fixed": fixed_df, "evolution": evolution_df}, "utilization", "Utilization Over Time", "Utilization (%)"
             ),
             "interval_time": build_chart_payload(
-                {"fixed": fixed_df, "havfs": havfs_df}, "effective_interval_s", "Effective Sampling Interval", "Sampling Interval (s)"
+                {"fixed": fixed_df, "evolution": evolution_df}, "effective_interval_s", "Effective Sampling Interval", "Sampling Interval (s)"
             ),
-            "latency_cdf": build_latency_cdf_chart({"fixed": fixed_latency_df, "havfs": havfs_latency_df}),
+            "latency_cdf": build_latency_cdf_chart({"fixed": fixed_latency_df, "evolution": evolution_latency_df}),
             "redundancy_time": build_chart_payload(
-                {"fixed": fixed_df, "havfs": havfs_df}, "redundancy_score", "Redundancy Score Over Time", "Redundancy (%)"
+                {"fixed": fixed_df, "evolution": evolution_df}, "redundancy_score", "Redundancy Score Over Time", "Redundancy (%)"
             ),
         },
         "files": {
@@ -670,29 +879,29 @@ def main():
     write_markdown_report(markdown_report, report)
 
     fixed_p50 = report["summary"]["latency_stats_s"]["fixed"]["p50_s"]
-    havfs_p50 = report["summary"]["latency_stats_s"]["havfs"]["p50_s"]
+    evolution_p50 = report["summary"]["latency_stats_s"]["evolution"]["p50_s"]
     fixed_p95 = report["summary"]["latency_stats_s"]["fixed"]["p95_s"]
-    havfs_p95 = report["summary"]["latency_stats_s"]["havfs"]["p95_s"]
+    evolution_p95 = report["summary"]["latency_stats_s"]["evolution"]["p95_s"]
 
     print("==========================================================")
-    print("      HAVFS 实验评估报告")
+    print("      故障演化采样实验评估报告")
     print("==========================================================")
     print(
         f"[1] 采样点数量: fixed={summary['sample_count']['fixed']}, "
-        f"havfs={summary['sample_count']['havfs']}, "
+        f"evolution={summary['sample_count']['evolution']}, "
         f"reduction={summary['sample_count']['reduction_percent']:.2f}%"
     )
     print(
         f"[2] 冗余率: fixed={summary['redundancy_rate_percent']['fixed']:.2f}%, "
-        f"havfs={summary['redundancy_rate_percent']['havfs']:.2f}%"
+        f"evolution={summary['redundancy_rate_percent']['evolution']:.2f}%"
     )
     print(
         f"[3] 平均采样间隔: fixed={summary['interval_stats_s']['fixed']['mean_s']:.4f}s, "
-        f"havfs={summary['interval_stats_s']['havfs']['mean_s']:.4f}s"
+        f"evolution={summary['interval_stats_s']['evolution']['mean_s']:.4f}s"
     )
     print(
         f"[4] 延迟 P50/P95: fixed={fixed_p50:.4f}/{fixed_p95:.4f}s, "
-        f"havfs={havfs_p50:.4f}/{havfs_p95:.4f}s"
+        f"evolution={evolution_p50:.4f}/{evolution_p95:.4f}s"
     )
     print(
         f"[5] 输出文件: csv={summary_csv}, curve={curve_output}, json={json_report}, "

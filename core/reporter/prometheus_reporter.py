@@ -30,15 +30,26 @@ class PrometheusReporter(BaseReporter):
         self.g_threads = Gauge("xpu_threads", "Active threads", labels)
         self.g_io_util = Gauge("xpu_io_util_percent", "IO utilization", labels)
         self.g_status = Gauge("xpu_status_ok", "1 if collector status is ok else 0", labels)
-        self.g_risk = Gauge("xpu_risk_score", "Calculated risk score", labels)
+        self.g_evolution = Gauge("xpu_evolution_score", "Fault-evolution urgency score", labels)
+        self.g_field_priority = Gauge("xpu_field_priority_score", "Layered field priority score", labels)
+        self.g_execution_pressure = Gauge("xpu_execution_pressure_score", "Edge execution pressure score", labels)
         self.g_int = Gauge("xpu_sampling_interval_seconds", "Current scheduling interval", labels)
 
-    def send(self, metrics: XPUDynamicMetrics, risk: float = 0.0, interval: float = 1.0):
+    def send(
+        self,
+        metrics: XPUDynamicMetrics,
+        evolution_score: float = 0.0,
+        field_priority_score: float = 0.0,
+        execution_pressure_score: float = 0.0,
+        interval: float = 1.0,
+    ):
         lbl = [metrics.device_id]
 
         self.g_util.labels(*lbl).set(metrics.utilization)
         self.g_status.labels(*lbl).set(1 if metrics.status == "ok" else 0)
-        self.g_risk.labels(*lbl).set(risk)
+        self.g_evolution.labels(*lbl).set(evolution_score)
+        self.g_field_priority.labels(*lbl).set(field_priority_score)
+        self.g_execution_pressure.labels(*lbl).set(execution_pressure_score)
         self.g_int.labels(*lbl).set(interval)
 
         if metrics.chip_temp_c is not None:

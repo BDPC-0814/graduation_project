@@ -1,161 +1,162 @@
-import re
-import shutil
-import subprocess
 import time
 from collections import deque
 from typing import Optional
 
 from core.adapter.base_adapter import BaseAdapter
+from core.adapter.npu.backends import (
+    AscendNPUSmiBackend,
+    NPUBackend,
+    OpenHarmonyHDCBackend,
+    RockchipSysfsBackend,
+)
 from core.model.base_xpu import XPUStaticInfo, XPUDynamicMetrics
 
 
 class NPUAdapter(BaseAdapter):
     """
-    NPU adapter with first-pass `npu-smi` support.
+    NPU adapter with pluggable backend support.
+
+    Backends hide vendor-specific collection details while preserving the
+    unified adapter contract used by the rest of the sampling pipeline.
     """
 
-    def __init__(self, device_id: str = "npu0", card_id: int = 0, duty_window_size: int = 10):
+    _BACKENDS = {
+        "ascend": AscendNPUSmiBackend,
+        "ascend_npu_smi": AscendNPUSmiBackend,
+        "openharmony_hdc": OpenHarmonyHDCBackend,
+        "rockchip_sysfs": RockchipSysfsBackend,
+    }
+    _AUTO_ORDER = [
+        AscendNPUSmiBackend,
+        OpenHarmonyHDCBackend,
+        RockchipSysfsBackend,
+    ]
+
+    def __init__(
+        self,
+        device_id: str = "npu0",
+        card_id: int = 0,
+        duty_window_size: int = 10,
+        backend: str = "auto",
+    ):
         super().__init__(device_id=device_id, device_type="NPU")
         self.card_id = card_id
+        self.backend = backend
         self.mode = "unavailable"
         self.init_error: Optional[str] = None
-        self.npu_smi_path = shutil.which("npu-smi")
         self.collect_started_at = time.time()
         self._duty_window = deque(maxlen=duty_window_size)
-        self._static_info = XPUStaticInfo(
-            device_id=device_id,
-            device_uid=device_id,
-            device_type="NPU",
-            vendor="Huawei",
-            model_name=f"Ascend card{card_id}",
-        )
+        self._last_fast_snapshot: Optional[dict] = None
+        self._backend = self._build_backend(backend)
+        self._static_info = self._backend.get_static_info() if self._backend else self._default_static_info()
 
-        if self.npu_smi_path:
-            self.mode = "ascend_npu_smi"
-            print(f"[NPU] mode=ascend_npu_smi device=card{self.card_id}")
+        if self._backend:
+            self.mode = self._backend.backend_name
+            self.init_error = self._backend.init_error
+            print(f"[NPU] mode={self.mode} device={self._static_info.model_name}")
         else:
-            self.init_error = "npu-smi command not found"
+            self.init_error = "no supported NPU backend detected"
             print(f"[NPU] mode=unavailable reason={self.init_error}")
 
     def get_static_info(self) -> XPUStaticInfo:
         return self._static_info
 
     def collect_fast(self) -> XPUDynamicMetrics:
-        snapshot = self._collect_snapshot()
-        if snapshot is None:
+        if self._backend is None:
             return self._collect_unavailable(self.init_error or "npu adapter unavailable")
 
-        util_value = snapshot["utilization"]
+        snapshot = self._backend.collect_fast_snapshot()
+        if snapshot is None:
+            self.init_error = self._backend.init_error or self.init_error or "npu adapter unavailable"
+            return self._collect_unavailable(self.init_error)
+
+        self._last_fast_snapshot = snapshot
+        util_value = self._safe_float(snapshot.get("utilization"), default=0.0)
         self._duty_window.append(util_value)
 
         return XPUDynamicMetrics(
             device_id=self.device_id,
             utilization=util_value,
-            temperature=snapshot["chip_temp_c"],
-            power=snapshot["power_w"],
-            memory_usage=snapshot["mem_util_percent"],
+            temperature=self._safe_float(snapshot.get("chip_temp_c")),
+            power=self._safe_float(snapshot.get("power_w")),
+            memory_usage=self._safe_float(snapshot.get("mem_util_percent")),
             collect_ts=int(time.time()),
-            chip_temp_c=snapshot["chip_temp_c"],
-            power_w=snapshot["power_w"],
+            chip_temp_c=self._safe_float(snapshot.get("chip_temp_c")),
+            board_temp_c=self._safe_float(snapshot.get("board_temp_c")),
+            power_w=self._safe_float(snapshot.get("power_w")),
             duty_cycle_percent=sum(self._duty_window) / len(self._duty_window),
-            mem_total_mib=snapshot["mem_total_mib"],
-            mem_used_mib=snapshot["mem_used_mib"],
-            mem_util_percent=snapshot["mem_util_percent"],
+            mem_total_mib=self._safe_int(snapshot.get("mem_total_mib")),
+            mem_used_mib=self._safe_int(snapshot.get("mem_used_mib")),
+            mem_util_percent=self._safe_float(snapshot.get("mem_util_percent")),
+            freq_mhz=self._safe_float(snapshot.get("freq_mhz")),
+            freq_cap_mhz=self._safe_float(snapshot.get("freq_cap_mhz")),
+            pstate=self._safe_str(snapshot.get("pstate")),
+            status=self._safe_str(snapshot.get("status"), default="ok"),
+            error=self._safe_str(snapshot.get("error")),
         )
 
     def collect_slow(self) -> dict:
-        snapshot = self._collect_snapshot()
-        if snapshot is None:
+        if self._backend is None:
             return {}
-        return {
-            "device_uptime_s": int(time.time() - self.collect_started_at),
-        }
+        snapshot = self._backend.collect_slow_snapshot(latest_fast_snapshot=self._last_fast_snapshot) or {}
+        snapshot.setdefault("device_uptime_s", int(time.time() - self.collect_started_at))
+        return snapshot
 
-    def _collect_snapshot(self) -> Optional[dict]:
-        if self.mode != "ascend_npu_smi":
+    def _build_backend(self, requested_backend: str) -> Optional[NPUBackend]:
+        normalized = (requested_backend or "auto").strip().lower()
+        if normalized == "auto":
+            for backend_cls in self._AUTO_ORDER:
+                if backend_cls.detect():
+                    return backend_cls(device_id=self.device_id, card_id=self.card_id)
+            return None
+
+        backend_cls = self._BACKENDS.get(normalized)
+        if backend_cls is None:
+            raise ValueError(
+                f"unsupported NPU backend '{requested_backend}', "
+                f"supported={sorted(['auto', *self._BACKENDS.keys()])}"
+            )
+        return backend_cls(device_id=self.device_id, card_id=self.card_id)
+
+    def _default_static_info(self) -> XPUStaticInfo:
+        return XPUStaticInfo(
+            device_id=self.device_id,
+            device_uid=self.device_id,
+            device_type="NPU",
+            vendor="Generic",
+            model_name="Unknown NPU",
+        )
+
+    def _safe_float(self, value, default: Optional[float] = None) -> Optional[float]:
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_int(self, value) -> Optional[int]:
+        if value is None:
             return None
         try:
-            output = subprocess.check_output(
-                [self.npu_smi_path, "info"], stderr=subprocess.STDOUT, text=True
-            )
-            row = self._find_card_row(output)
-            if row is None:
-                self.init_error = "npu-smi output parse failed"
-                return None
-
-            util = self._extract_percent(row, ("AICore", "Util", "AICore(%)"))
-            chip_temp_c = self._extract_number(row, ("Temp", "Temperature"))
-            power_w = self._extract_number(row, ("Power", "Power(W)"))
-            mem_used_mib, mem_total_mib = self._extract_memory_usage(row)
-            mem_util_percent = None
-            if mem_used_mib is not None and mem_total_mib:
-                mem_util_percent = mem_used_mib / mem_total_mib * 100.0
-
-            return {
-                "utilization": util if util is not None else 0.0,
-                "chip_temp_c": chip_temp_c,
-                "power_w": power_w,
-                "mem_used_mib": mem_used_mib,
-                "mem_total_mib": mem_total_mib,
-                "mem_util_percent": mem_util_percent,
-            }
-        except Exception as exc:  # noqa: BLE001
-            self.init_error = f"npu-smi sample failed: {exc}"
-            print(f"[NPU][Warn] {self.init_error}")
+            return int(value)
+        except (TypeError, ValueError):
             return None
 
-    def _find_card_row(self, text: str) -> Optional[str]:
-        for line in text.splitlines():
-            if re.search(rf"\b{self.card_id}\b", line) and ("%" in line or "W" in line):
-                return line
-        return None
-
-    def _extract_percent(self, line: str, aliases) -> Optional[float]:
-        for alias in aliases:
-            match = re.search(
-                rf"{re.escape(alias)}[^0-9]*([0-9]+(?:\.[0-9]+)?)\s*%",
-                line,
-                re.IGNORECASE,
-            )
-            if match:
-                return float(match.group(1))
-        generic = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", line)
-        if generic:
-            return float(generic.group(1))
-        return None
-
-    def _extract_number(self, line: str, aliases) -> Optional[float]:
-        for alias in aliases:
-            match = re.search(rf"{re.escape(alias)}[^0-9]*([0-9]+(?:\.[0-9]+)?)", line, re.IGNORECASE)
-            if match:
-                return float(match.group(1))
-        return None
-
-    def _extract_memory_usage(self, line: str) -> tuple[Optional[int], Optional[int]]:
-        ratio = re.search(
-            r"([0-9]+(?:\.[0-9]+)?)\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*(MiB|MB|GiB|GB)",
-            line,
-            re.IGNORECASE,
-        )
-        if not ratio:
-            return None, None
-
-        used = self._to_mib(float(ratio.group(1)), ratio.group(3))
-        total = self._to_mib(float(ratio.group(2)), ratio.group(3))
-        return used, total
-
-    def _to_mib(self, value: float, unit: str) -> int:
-        if unit.lower() in {"gib", "gb"}:
-            return int(round(value * 1024.0))
-        return int(round(value))
+    def _safe_str(self, value, default: Optional[str] = None) -> Optional[str]:
+        if value is None:
+            return default
+        text = str(value).strip()
+        return text or default
 
     def _collect_unavailable(self, reason: str) -> XPUDynamicMetrics:
+        now = int(time.time())
         return XPUDynamicMetrics(
             device_id=self.device_id,
             utilization=0.0,
-            collect_ts=int(time.time()),
+            collect_ts=now,
             status="unavailable",
             error=reason,
             last_error_code=reason,
-            last_error_ts=int(time.time()),
+            last_error_ts=now,
         )

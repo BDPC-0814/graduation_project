@@ -1,30 +1,32 @@
-﻿# HAVFS 实验评估报告
+﻿# 故障演化采样实验评估报告
 
-Generated at: 2026-03-27T14:23:42
+Generated at: 2026-04-26T15:38:18
 
 ## 1. 实验总览
 
-| 指标 | 固定频率 | HAVFS | 说明 |
+| 指标 | 固定频率 | 故障演化采样 | 说明 |
 | --- | ---: | ---: | --- |
-| 采样点数量 | 6 | 6 | HAVFS 采样点减少 0.00% |
-| 冗余率 | 0.00% | 0.00% | 双层判定：|delta util| <= 1.0 且 delta time <= 5.0 s |
-| 平均采样间隔 | 5.0 s | 4.7966 s | 已包含有效采样间隔补全 |
-| 延迟 P50 | 5.0 s | 4.72532 s | 事件驱动响应延迟 |
-| 延迟 P95 | 5.0 s | 4.964507581894882 s | 无显式加速时回退到 next_refresh / interval estimate |
-| CPU 平均开销 | 0.0833 % | 0.15 % | |
-| 内存平均开销 | 29.6217 MB | 31.776 MB | |
+| 采样点数量 | 66 | 65 | 故障演化采样采样点减少 1.52% |
+| 冗余率 | 34.85% | 16.92% | 低信息量重复采样：变化增益低、相位未变、策略未变、且处于短间隔快线重复采样 |
+| 平均采样间隔 | 5.0085 s | 5.2692 s | 已包含有效采样间隔补全 |
+| 延迟 P50 | 2.1710000000000065 s | 2.218999999999994 s | 事件驱动响应延迟 |
+| 延迟 P95 | 3.8841000000000014 s | 3.638099999999998 s | 无显式加速时回退到 next_refresh / interval estimate |
+| 慢线激活率 | 22.7273 % | 23.0769 % | 字段分层补采活跃程度 |
+| 缓冲上传占比 | 0.0 % | 55.3846 % | 边端可靠执行链路参与程度 |
+| CPU 平均开销 | 0.0409 % | 0.48 % | |
+| 内存平均开销 | 66.5459 MB | 66.2892 MB | |
 
 ## 2. 指标定义
 
-- Latency: from a significant workload event to the first accelerated response. A significant event is detected when utilization jump >= 5.0 or utilization >= the 85% quantile threshold.
-- Acceleration response: interval shrinks by at least 15%, or the sampler enters a high-priority state.
+- Latency: measured from shared ground-truth event timestamps to the first accelerated response or first observation after the event.
+- Acceleration response: interval shrinks by at least 15%, or the sampler enters a focus / recovery phase.
 - NaN avoidance: if no explicit acceleration is observed in the reaction window, latency falls back to `next_refresh`; if the trace ends, it falls back to `estimated_by_interval`.
-- Redundancy: a point is redundant only when both numeric similarity and time-window similarity hold at the same time.
+- Redundancy: a point is counted as redundant only when information gain stays low, the phase and field policy do not change, and the point appears as a short-gap fast-lane repeat sample.
 
 延迟阈值：
 
-- 固定频率高负载阈值：18.75
-- HAVFS 高负载阈值：31.6
+- Fixed mode latency source: ground_truth_events (events=7)
+- Evolution mode latency source: ground_truth_events (events=7)
 
 ## 3. 图表
 

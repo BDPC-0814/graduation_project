@@ -8,8 +8,8 @@ class NPUCollector(BaseCollector):
     Backward-compatible wrapper around NPUAdapter.
     """
 
-    def __init__(self, device_id: str = "npu0", card_id: int = 0):
-        self.adapter = NPUAdapter(device_id=device_id, card_id=card_id)
+    def __init__(self, device_id: str = "npu0", card_id: int = 0, backend: str = "auto"):
+        self.adapter = NPUAdapter(device_id=device_id, card_id=card_id, backend=backend)
 
     def collect(self) -> XPUDynamicMetrics:
         return self.adapter.collect_full()
