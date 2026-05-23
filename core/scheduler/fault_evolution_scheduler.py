@@ -95,9 +95,12 @@ class FaultEvolutionScheduler:
         t_max: float = 6.0,
         slow_refresh_cycles: int = 6,
         focus_hold_cycles: int = 1,
-        recovery_hold_cycles: int = 1,
+        recovery_hold_cycles: int = 0,
         thermal_limit_c: float = 85.0,
         baseline_alpha: float = 0.12,
+        enable_urgency: bool = True,
+        enable_field_priority: bool = True,
+        enable_execution_pressure: bool = True,
     ):
         self.t_min = t_min
         self.t_max = t_max
@@ -106,6 +109,9 @@ class FaultEvolutionScheduler:
         self.recovery_hold_cycles = max(0, recovery_hold_cycles)
         self.thermal_limit_c = thermal_limit_c
         self.baseline_alpha = max(0.01, min(baseline_alpha, 0.5))
+        self.enable_urgency = enable_urgency
+        self.enable_field_priority = enable_field_priority
+        self.enable_execution_pressure = enable_execution_pressure
 
         self.current_interval = t_max
         self.last_utilization: Optional[float] = None
@@ -116,6 +122,7 @@ class FaultEvolutionScheduler:
         self.power_baseline: Optional[float] = None
         self.focus_hold_remaining = 0
         self.recovery_hold_remaining = 0
+        self.risk_confirm_count = 0
         self.last_breakdown = ControlBreakdown()
 
     def decide(
@@ -259,7 +266,14 @@ class FaultEvolutionScheduler:
             + field_flag_bonus
         )
 
+        if not self.enable_urgency:
+            urgency = 0.0
+        if not self.enable_field_priority:
+            field_priority = 0.0
+
         execution_pressure = self._compute_execution_pressure(feedback)
+        if not self.enable_execution_pressure:
+            execution_pressure = 0.0
         control_score = _clamp((urgency * 0.52) + (field_priority * 0.36) - (execution_pressure * 0.30))
 
         return ControlBreakdown(
@@ -281,20 +295,37 @@ class FaultEvolutionScheduler:
 
     def _select_phase(self, metrics: XPUDynamicMetrics, breakdown: ControlBreakdown) -> str:
         abnormal = metrics.status != "ok" or bool(metrics.error) or bool(metrics.last_error_code)
-        focus_trigger = (
+        certain_focus_trigger = (
             abnormal
-            or breakdown.urgency >= 58.0
+            or metrics.throttle_flag
+            or breakdown.urgency >= 66.0
+            or breakdown.control_score >= 58.0
+            or (breakdown.urgency >= 52.0 and breakdown.field_priority >= 60.0)
+        )
+        marginal_focus_trigger = (
+            breakdown.urgency >= 58.0
             or breakdown.control_score >= 50.0
             or (breakdown.urgency >= 44.0 and breakdown.field_priority >= 52.0)
         )
         degraded_trigger = breakdown.execution_pressure >= 78.0 and breakdown.urgency < 58.0
         recovery_trigger = (
-            breakdown.urgency >= 30.0
-            or breakdown.field_priority >= 40.0
-            or breakdown.control_score >= 28.0
+            breakdown.urgency >= 34.0
+            or breakdown.field_priority >= 46.0
+            or breakdown.control_score >= 34.0
         )
 
+        if certain_focus_trigger:
+            self.risk_confirm_count = 0
+            focus_trigger = True
+        elif marginal_focus_trigger:
+            self.risk_confirm_count += 1
+            focus_trigger = self.risk_confirm_count >= 2
+        else:
+            self.risk_confirm_count = 0
+            focus_trigger = False
+
         if focus_trigger:
+            self.risk_confirm_count = 0
             self.focus_hold_remaining = self.focus_hold_cycles
             self.recovery_hold_remaining = self.recovery_hold_cycles
             return "FOCUS"

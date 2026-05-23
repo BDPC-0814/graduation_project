@@ -261,7 +261,7 @@ class LiveCollectionRequest(BaseModel):
     devices: str = "cpu"
     gpu_vendor: Literal["auto", "nvidia", "intel"] = "auto"
     npu_backend: Literal["auto", "ascend", "openharmony_hdc", "rockchip_sysfs"] = "auto"
-    mode: Literal["fixed", "evolution"] = "evolution"
+    mode: Literal["fixed", "threshold", "trend", "evolution"] = "evolution"
     duration: float = 60.0
     fixed_interval: float = 5.0
     t_min: float = 0.5

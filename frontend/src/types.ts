@@ -297,7 +297,7 @@ export type LiveCollectionPayload = {
   devices: string;
   gpu_vendor: "auto" | "nvidia" | "intel";
   npu_backend: "auto" | "ascend" | "openharmony_hdc" | "rockchip_sysfs";
-  mode: "fixed" | "evolution";
+  mode: "fixed" | "threshold" | "trend" | "evolution";
   duration: number;
   fixed_interval: number;
   t_min: number;

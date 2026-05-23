@@ -309,7 +309,7 @@ export function ControlConsolePage() {
             <div className="eyebrow">System Console</div>
             <h1>图形化启动与实验控制台</h1>
             <p>
-              这里把实时采集、回放轨迹生成、fixed/evolution 对比评估和任务日志放在同一个页面里。常用操作不需要再手动输入一长串命令。
+              这里把实时采集、回放轨迹生成、多基线对比评估和任务日志放在同一个页面里。常用操作不需要再手动输入一长串命令。
             </p>
           </div>
           <div className="control-hero-pills">
@@ -395,6 +395,8 @@ export function ControlConsolePage() {
                         }
                       >
                         <option value="evolution">evolution</option>
+                        <option value="threshold">threshold</option>
+                        <option value="trend">trend</option>
                         <option value="fixed">fixed</option>
                       </select>
                     </label>

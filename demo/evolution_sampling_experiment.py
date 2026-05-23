@@ -96,7 +96,7 @@ EVENT_HEADERS = [
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["fixed", "evolution"], default="fixed")
+    parser.add_argument("--mode", choices=["fixed", "threshold", "trend", "evolution"], default="fixed")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--vendor", choices=["auto", "nvidia", "intel"], default="auto")
     parser.add_argument(
@@ -114,7 +114,7 @@ def parse_args():
     parser.add_argument("--event-output", type=str, default="experiments/events.csv")
     parser.add_argument("--outbox-db", type=str, default="experiments/outbox.db")
     parser.add_argument("--remote-endpoint", type=str, default="")
-    parser.add_argument("--retry-batch-size", type=int, default=100)
+    parser.add_argument("--retry-batch-size", type=int, default=50)
     parser.add_argument("--retry-max-attempts", type=int, default=8)
     return parser.parse_args()
 
@@ -263,10 +263,11 @@ def main():
         samplers=samplers,
         outbox=outbox,
         uploader=uploader,
-        wal_batch_size=max(10, args.retry_batch_size),
+        wal_batch_size=max(8, args.retry_batch_size),
         upload_batch_size=args.retry_batch_size,
         retry_max_attempts=args.retry_max_attempts,
     )
+    baseline_mem_mb = process.memory_info().rss / 1024 / 1024
 
     with open(args.output, "w", newline="", encoding="utf-8-sig") as f, open(
         args.event_output, "w", newline="", encoding="utf-8-sig"
@@ -279,7 +280,7 @@ def main():
         def on_metric(result, elapsed, wallclock):
             metrics = result.metrics
             overhead_cpu = process.cpu_percent(interval=None)
-            overhead_mem_mb = process.memory_info().rss / 1024 / 1024
+            overhead_mem_mb = max(0.0, process.memory_info().rss / 1024 / 1024 - baseline_mem_mb)
             pending, dead = outbox.stats()
             ring_backlog = agent.ring_buffer.size()
             metric_payload = make_metric_payload(

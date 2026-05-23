@@ -37,6 +37,9 @@ frontend/*.tsbuildinfo
 *.err
 tmp_start_system.*.log
 
+# Local documentation drafts and generated assets
+docs/
+
 # Experiment artifacts
 experiments/**/*.csv
 experiments/**/*.png

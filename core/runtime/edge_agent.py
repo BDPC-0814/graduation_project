@@ -32,7 +32,7 @@ class EdgeAgent:
         retry_max_attempts: int = 8,
     ):
         self.samplers = samplers
-        self.ring_buffer = ring_buffer or RingBuffer(capacity=max(1024, len(samplers) * 64))
+        self.ring_buffer = ring_buffer or RingBuffer(capacity=max(256, len(samplers) * 64))
         self.outbox = outbox
         self.uploader = uploader
         self.wal_batch_size = wal_batch_size
